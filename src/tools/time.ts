@@ -73,6 +73,7 @@ export function registerTimeTool(server: McpServer): void {
   server.registerTool(
     'get_current_time',
     {
+      title: '真实时间',
       description:
         'Get the actual current date and time. ' +
         'Accepts: an IANA timezone (e.g. "Asia/Shanghai", "America/New_York"), ' +

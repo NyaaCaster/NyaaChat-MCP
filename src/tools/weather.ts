@@ -79,6 +79,7 @@ export function registerWeatherTool(server: McpServer): void {
   server.registerTool(
     'get_weather',
     {
+      title: '实时天气',
       description:
         'Get current weather for a location via QWeather. ' +
         'Accepts: a country name (e.g. "中国", "美国", "Japan"), ' +

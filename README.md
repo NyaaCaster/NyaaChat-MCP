@@ -2,8 +2,8 @@
 
 为 [NyaaChat](https://github.com/NyaaCaster/NyaaChat) 等基于 LLM 的角色扮演聊天平台提供标准 [MCP](https://modelcontextprotocol.io/) 支持的轻量服务。当前提供两个工具：
 
-- `get_current_time` — 获取实际当前时间
-- `get_weather` — 获取实时天气
+- `get_current_time`（显示名"真实时间"）— 获取实际当前时间
+- `get_weather`（显示名"实时天气"）— 获取实时天气
 
 服务通过 **Streamable HTTP** 单端点对外暴露，兼容 Chatbox / Cherry Studio / SillyTavern 等远程 MCP 客户端。
 
@@ -84,7 +84,14 @@ GET http://h.hony-wen.com:3094/health
 
 ## 工具一览
 
-### `get_current_time`
+> 每个工具都有两个名字：`name` 是 LLM 调用时使用的程序化标识符（英文蛇形），`title` 是客户端 UI 上显示给用户看的中文名。MCP 规范原生支持这种双名设计（[Tool.title](https://modelcontextprotocol.io/specification/2025-06-18/server/tools#tool)），Chatbox / Cherry Studio / SillyTavern 等客户端在工具列表里会优先显示 `title`。
+
+| name（调用用） | title（显示用） |
+|---|---|
+| `get_current_time` | 真实时间 |
+| `get_weather` | 实时天气 |
+
+### `get_current_time` · 真实时间
 
 获取真实世界当前时间。**入参 `timezone` 可选**，接受非常宽松的输入：
 
@@ -104,7 +111,7 @@ Current time in America/New_York (UTC-04:00):
   DST active:  yes
 ```
 
-### `get_weather`
+### `get_weather` · 实时天气
 
 获取实时天气（**仅实况，无预报**）。**入参 `location` 可选**，与时间工具同形：
 
