@@ -1,0 +1,17 @@
+services:
+  app:
+    build: .
+    image: nyaachat-mcp:latest
+    container_name: nyaachat-mcp
+    environment:
+      # Ensure log timestamps and the time tool report Asia/Shanghai
+      # rather than container-default UTC. tzdata is installed in the
+      # Dockerfile so Node's Intl picks this up correctly.
+      - TZ=Asia/Shanghai
+      - MCP_PORT=3094
+      - MCP_HOST=0.0.0.0
+    env_file:
+      - .env
+    ports:
+      - "3094:3094"
+    restart: unless-stopped
