@@ -1,9 +1,16 @@
 # NyaaChat-MCP
 
-为 [NyaaChat](https://github.com/NyaaCaster/NyaaChat) 等基于 LLM 的角色扮演聊天平台提供标准 [MCP](https://modelcontextprotocol.io/) 支持的轻量服务。当前提供两个工具：
+为 [NyaaChat](https://github.com/NyaaCaster/NyaaChat) 等基于 LLM 的角色扮演聊天平台提供标准 [MCP](https://modelcontextprotocol.io/) 支持的轻量服务。当前提供九个工具：
 
 - `get_current_time`（显示名"真实时间"）— 获取实际当前时间
 - `get_weather`（显示名"实时天气"）— 获取实时天气
+- `roll_dice`（显示名"骰子"）— 通用 NdM±X 骰子
+- `roll_dnd`（显示名"DnD 检定"）— D&D 5e d20 检定（含优势/劣势/DC/暴击）
+- `roll_coc`（显示名"CoC 检定"）— CoC 7e d100 技能检定（含奖励骰/惩罚骰/成功等级）
+- `flip_coin`（显示名"硬币"）— 抛硬币
+- `cast_iching`（显示名"易经起卦"）— 易经三钱法起卦（本卦 + 之卦）
+- `draw_tarot`（显示名"塔罗牌"）— 韦特塔罗（单张/三张/凯尔特十字）
+- `draw_qian`（显示名"抽签"）— 关帝灵签 100 签（项目内置摘录版）
 
 服务通过 **Streamable HTTP** 单端点对外暴露，兼容 Chatbox / Cherry Studio / SillyTavern 等远程 MCP 客户端。
 
@@ -90,6 +97,15 @@ GET http://h.hony-wen.com:3094/health
 |---|---|
 | `get_current_time` | 真实时间 |
 | `get_weather` | 实时天气 |
+| `roll_dice` | 骰子 |
+| `roll_dnd` | DnD 检定 |
+| `roll_coc` | CoC 检定 |
+| `flip_coin` | 硬币 |
+| `cast_iching` | 易经起卦 |
+| `draw_tarot` | 塔罗牌 |
+| `draw_qian` | 抽签 |
+
+> 九个工具相互独立，各自启用/禁用互不影响。RP 用户可以只启用与角色背景契合的工具子集——例如克苏鲁兵团 RP 只开 `roll_coc` + `roll_dice`、欧美奇幻 RP 开 `roll_dnd` + `draw_tarot`、东方修仙/玄学 RP 开 `cast_iching` + `draw_qian`——避免无关工具的描述与 schema 占用 LLM 上下文造成注意力偏移。
 
 ### `get_current_time` · 真实时间
 
@@ -135,13 +151,288 @@ Current time in America/New_York (UTC-04:00):
   详情：https://www.qweather.com/weather/nanning-101300101.html
 ```
 
-> 工具返回的字段是给 LLM 消费的——直接照搬给最终用户会显得机械。在角色扮演 / 对话场景下，建议参考[第二部分](#二角色扮演场景下的数据使用准则)的使用准则做一次"翻译"。
+> 📘 时间 / 天气工具返回的字段是给 LLM 消费的——直接照搬给最终用户会显得机械。在角色扮演 / 对话场景下，建议参考[第二部分](#二角色扮演场景下的数据使用准则)的使用准则做一次"翻译"。
+
+> 🎲 **下面七个掷骰 / 占卜类工具均直接返回标准结果，不要求 LLM 端做 RP 化二次包装**——掷骰、抽牌、起卦、抽签本身在 RP 中自带仪式感，且每个工具的返回都已经是结构化"成品"（检定结果 / 牌阵 / 卦象 / 签号）。**展示方式由 LLM 侧自行决定**：可以直接把标准结果贴在对话里作为剧情道具，也可以用极轻量的角色口吻引出（如"我帮你抽一张"）。[第二部分](#二角色扮演场景下的数据使用准则)的 RP 准则**不适用**这七个工具。
+
+> ⚠️ **掷骰 / 占卜类工具是无状态计算器，剧情连贯性的责任在 LLM 侧。** 工具不会因为前一步检定通过 / 失败就阻止你调下一个；它只负责给你一个数。LLM 必须根据上一步结果自行判断要不要继续：CoC 的 `0/X` 类 SAN 检定**通过则不掷损失骰**；DnD 攻击 `vs DC → 失败` 时**不应再掷伤害骰**；CoC 大失败 / DnD natural 1 后的额外惩罚也由 LLM 决定要不要再发起新的工具调用。串骰前先看清前一步的判定结果。
+
+### `roll_dice` · 骰子
+
+通用 NdM±X 骰子。**入参 `expression` 必填**，支持任意数量的骰子组与常数加减组合。
+
+- 基础：`3d6+2`、`1d100`、`2d8-1`
+- 多组叠加：`4d6+1d4+3`、`2d10-1d4`
+- 上限：单组骰子数量 ≤ 100，单骰面数 ≤ 1000
+
+适用：伤害骰、SAN 损失骰、随机表骰、属性生成骰等"非检定"的纯随机数生成。
+
+**调用示例：**
+```bash
+curl -X POST http://h.hony-wen.com:3094/mcp \
+  -H "Authorization: Bearer xxxxxx" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
+       "params":{"name":"roll_dice","arguments":{"expression":"3d6+2"}}}'
+```
+
+**返回示例：**
+```
+3d6 + 2 = 13
+  3d6: [4, 6, 1] = 11
+```
+
+### `roll_dnd` · DnD 检定
+
+D&D 5e d20 检定 / 豁免 / 攻击骰。
+
+**入参：**
+- `expression`（必填）— 必须包含**恰好一个 1d20 主骰**，可附加最多 3 项额外修正：常数（如 `+5`）或小骰子组（如 `+1d4`，用于祝福/罡风/吟游灵感等加成）
+- `advantage`（可选）— `"normal"`（默认）/ `"advantage"`（优势：2d20 取高）/ `"disadvantage"`（劣势：2d20 取低）
+- `dc`（可选，整数）— 难度等级；给了就比对成功/失败
+- `type`（可选）— `"check"`（默认）/ `"save"` / `"attack"` / `"raw"`；只有 `"attack"` 会把 natural 20/1 标记为暴击/必失
+
+**调用示例（祝福术下的优势攻击 vs DC 15）：**
+```bash
+curl -X POST http://h.hony-wen.com:3094/mcp \
+  -H "Authorization: Bearer xxxxxx" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
+       "params":{"name":"roll_dnd","arguments":{
+         "expression":"1d20+5+1d4",
+         "advantage":"advantage",
+         "dc":15,
+         "type":"attack"
+       }}}'
+```
+
+**返回示例：**
+```
+DnD 攻击（优势）
+  d20: 18, 7  → 取 18
+  修正：+5
+  +1d4: 3
+  最终：26 vs DC 15 → 成功
+```
+
+**典型场景速查：**
+
+| 场景 | 调用 |
+|---|---|
+| 普通技能检定 | `{expression:"1d20+3"}` |
+| 力量豁免 vs DC 13 | `{expression:"1d20+2", type:"save", dc:13}` |
+| 优势攻击 | `{expression:"1d20+5", advantage:"advantage", type:"attack"}` |
+| 劣势 + 罡风减益 | `{expression:"1d20+3-1d4", advantage:"disadvantage"}` |
+| 先攻 | `{expression:"1d20+2"}` |
+| 死亡豁免（5e DC10） | `{expression:"1d20", type:"save", dc:10}` |
+
+伤害骰（`2d6+3`、暴击翻倍 `4d6+3` 等）走 `roll_dice`，不在 `roll_dnd` 范畴。
+
+### `roll_coc` · CoC 检定
+
+CoC 7e 百分骰技能检定（**点数越低越好**）。
+
+**入参：**
+- `skill`（必填，整数 1–200）— 技能值
+- `bonus`（可选，0–2）— 奖励骰数量
+- `penalty`（可选，0–2）— 惩罚骰数量
+- bonus 与 penalty **互斥**
+
+**判定规则（CoC 7e 官方）：**
+
+| 等级 | 阈值 |
+|---|---|
+| 大成功 | 骰点 = 1 |
+| 极难成功 | ≤ skill / 5（向下取整） |
+| 困难成功 | ≤ skill / 2（向下取整） |
+| 普通成功 | ≤ skill |
+| 失败 | > skill |
+| 大失败 | skill ≥ 50 时 = 100；skill < 50 时 96–100 |
+
+奖励骰：多掷 N 个十位骰，从所有十位骰里**选出最有利（结果最低）的组合**。惩罚骰反之。
+
+**调用示例（技能 60，1 个奖励骰）：**
+```bash
+curl -X POST http://h.hony-wen.com:3094/mcp \
+  -H "Authorization: Bearer xxxxxx" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
+       "params":{"name":"roll_coc","arguments":{
+         "skill":60,
+         "bonus":1
+       }}}'
+```
+
+**返回示例：**
+```
+CoC 技能检定（技能值 60，奖励骰 ×1）
+  十位骰：3, 0*  → 取 0
+  个位骰：4
+  最终：04
+  判定：极难成功（≤12）
+  阈值参考：普通 ≤60 / 困难 ≤30 / 极难 ≤12 / 大成功 =1 / 大失败 =100
+```
+
+> 十位骰列表里带 `*` 的是被选用的那个。
+
+**典型场景速查：**
+
+| 场景 | 调用 |
+|---|---|
+| 标准技能检定（侦查 65） | `{skill:65}` |
+| 紧张状态下技能检定（1 惩罚骰） | `{skill:65, penalty:1}` |
+| 关键时刻 + 推一把（2 奖励骰） | `{skill:65, bonus:2}` |
+| 母语母语级技能（buff 后） | `{skill:120}` |
+
+理智检定的"扣 X/Y SAN"伤害骰（如 `1/1d6`）走 `roll_dice`：先用 `roll_coc({skill:你的SAN})` 判通过/失败，再 `roll_dice({expression:"1"})` 或 `roll_dice({expression:"1d6"})`。
+
+### `flip_coin` · 硬币
+
+抛一枚或多枚公平硬币，返回正/反序列与统计。**入参 `count` 可选**（1–100，默认 1）。
+
+适用：快速二选一、二元概率、占卜起头（不过易经请走 `cast_iching` 而非手抛三枚硬币）。
+
+**调用示例（5 枚硬币）：**
+```bash
+curl -X POST http://h.hony-wen.com:3094/mcp \
+  -H "Authorization: Bearer xxxxxx" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
+       "params":{"name":"flip_coin","arguments":{"count":5}}}'
+```
+
+**返回示例：**
+```
+硬币 ×5
+  序列：正 反 反 正 正
+  统计：正 3 / 反 2
+```
+
+### `cast_iching` · 易经起卦
+
+三钱法（金钱卦）起卦：每爻掷三枚硬币，正面 = 3、反面 = 2，求和判定老阴/少阳/少阴/老阳。**无入参**。
+
+返回内容：
+
+- 六爻自下而上的爻象（含原始硬币序列）
+- **本卦**：第 N 卦 卦名 + Unicode 卦象（如 ䷇）
+- **变爻**：哪几爻是老阴/老阳（共几爻）
+- **之卦**：变爻翻转后形成的新卦（无变爻时不显示）
+
+**调用示例：**
+```bash
+curl -X POST http://h.hony-wen.com:3094/mcp \
+  -H "Authorization: Bearer xxxxxx" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
+       "params":{"name":"cast_iching","arguments":{}}}'
+```
+
+**返回示例：**
+```
+易经起卦（三钱法）
+
+爻象（自下而上）：
+  上爻：老阴 ▬ ▬ ✕  [反 反 反]
+  五爻：少阳 ▬▬▬  [正 反 反]
+  四爻：少阴 ▬ ▬  [正 正 反]
+  三爻：老阴 ▬ ▬ ✕  [反 反 反]
+  二爻：少阴 ▬ ▬  [正 正 反]
+  初爻：老阴 ▬ ▬ ✕  [反 反 反]
+
+本卦：第 8 卦 比 ䷇
+变爻：初爻、三爻、上爻（共 3 爻）
+之卦：第 37 卦 家人 ䷤
+```
+
+> 工具不返回卦辞 / 爻辞——那部分版本众多，由 LLM 用文化常识解读为宜。
+
+### `draw_tarot` · 塔罗牌
+
+韦特塔罗 78 张（22 大阿尔卡纳 + 56 小阿尔卡纳），无放回抽牌，每张牌 50% 概率逆位。
+
+**入参：**
+- `spread`（可选）— 牌阵：`"single"`（单张）/ `"three"`（过去-现在-未来，**默认**）/ `"celtic"`（凯尔特十字 10 张）
+- `question`（可选，≤ 200 字）— 所问问题，回包里原样附带，给 LLM 提供叙事上下文
+
+每张牌返回：位置标签、中英牌名、正/逆位、3 个对应方向的关键词。**只给关键词，不给完整解读**——让角色用第一人称演绎。
+
+**调用示例（三张牌阵带问题）：**
+```bash
+curl -X POST http://h.hony-wen.com:3094/mcp \
+  -H "Authorization: Bearer xxxxxx" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
+       "params":{"name":"draw_tarot","arguments":{
+         "spread":"three",
+         "question":"今年的事业运势？"
+       }}}'
+```
+
+**返回示例：**
+```
+塔罗 · 三张牌阵（3 张）
+所问：今年的事业运势？
+
+过去：权杖三 Three of Wands（逆位）
+  关键词：失算、受阻、视野狭窄
+现在：圣杯九 Nine of Cups（正位）
+  关键词：满足、愿成、小确幸
+未来：权杖八 Eight of Wands（逆位）
+  关键词：拖沓、失序、卡住
+```
+
+**牌阵速查：**
+
+| spread | 张数 | 位置 |
+|---|---|---|
+| `single` | 1 | 核心 |
+| `three` | 3 | 过去 / 现在 / 未来 |
+| `celtic` | 10 | 当下 / 挑战 / 潜意识 / 过去 / 可能未来 / 近期 / 自身态度 / 外在影响 / 希望恐惧 / 最终结果 |
+
+### `draw_qian` · 抽签
+
+关帝灵签 100 签，**项目内置摘录版**——只返回签号 + 五档吉凶等级（上上 / 上吉 / 中吉 / 中平 / 下下）+ 等级通用指引。**不返回签诗与签解**，因为不同祠庙流派版本差异大，项目宁可留白让 LLM 用文化常识演绎，也不冒错版本误导用户的风险。
+
+**入参：** 无。
+
+**调用示例：**
+```bash
+curl -X POST http://h.hony-wen.com:3094/mcp \
+  -H "Authorization: Bearer xxxxxx" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call",
+       "params":{"name":"draw_qian","arguments":{}}}'
+```
+
+**返回示例：**
+```
+关帝灵签 · 第 78 签
+等级：上上
+通用指引：吉祥如意，谋望可成，宜进取。
+
+（项目内置摘录版：仅返回签号与等级，签诗 / 签解请由 LLM 依文化背景演绎；
+具体签号到签诗的对应关系版本众多，本项目不内置以避免误导。）
+```
+
+**等级分布**（项目内置版）：上上 10 / 上吉 20 / 中吉 30 / 中平 25 / 下下 15，比例参考传统但具体签号到等级的对应关系是项目内置分配。
 
 ---
 
 # 二、角色扮演场景下的数据使用准则
 
 > 这部分写给**接入本 MCP 的 LLM 角色卡 / 系统提示词**。建议把整段嵌进角色提示，或精简后挂在工具调用结果之前。
+
+> ⚠️ **适用范围**：本章节的所有准则**只适用于 `get_current_time` 和 `get_weather` 两个工具**——它们返回的是低层字段（IANA 时区名、DST、湿度百分比、气压等），需要 LLM 翻译成感官化对白。
+>
+> **掷骰 / 占卜类七个工具不适用本章节**：`roll_dice` / `roll_dnd` / `roll_coc` / `flip_coin` / `cast_iching` / `draw_tarot` / `draw_qian` 的返回已经是结构化的"成品"（检定结果 / 牌阵 / 卦象 / 签号），自带仪式感。**直接请求、返回标准结果、展示方式由 LLM 侧自行决定**——把原始返回贴在对话里作为剧情道具就是合理且常见的做法。
 
 ## 2.0 为什么要有这套规则
 
@@ -352,7 +643,21 @@ src/
 ├── server.ts             # McpServer 工厂，注册所有工具
 ├── tools/
 │   ├── time.ts           # get_current_time（timeapi.io + GeoAPI 兜底）
-│   └── weather.ts        # get_weather（/v7/weather/now + GeoAPI 解析）
+│   ├── weather.ts        # get_weather（/v7/weather/now + GeoAPI 解析）
+│   ├── dice.ts           # roll_dice（通用 NdM±X）
+│   ├── dnd.ts            # roll_dnd（D&D 5e d20 检定）
+│   ├── coc.ts            # roll_coc（CoC 7e d100 技能检定）
+│   ├── coin.ts           # flip_coin（抛硬币）
+│   ├── iching.ts         # cast_iching（易经三钱法起卦）
+│   ├── tarot.ts          # draw_tarot（韦特塔罗）
+│   └── qian.ts           # draw_qian（关帝灵签摘录版）
+├── dice/
+│   ├── parser.ts         # 表达式解析（通用 + DnD 专用变体）
+│   └── roller.ts         # crypto.randomInt 安全随机源
+├── divination/
+│   ├── iching-data.ts    # 64 卦索引 → {卦序, 卦名}
+│   ├── tarot-data.ts     # 78 张牌数据 + 三种牌阵定义
+│   └── qian-data.ts      # 100 签 → 等级映射 + 等级通用指引
 └── qweather/
     ├── client.ts         # 共享 creds、HTTP wrapper、geoLookupOne
     ├── countries.ts      # 32 国别名 → 主城映射
@@ -410,13 +715,40 @@ bash ./rebuild.sh
 | --- | --- | --- |
 | `MCP_PORT` | `3094` | HTTP 监听端口 |
 | `MCP_HOST` | `0.0.0.0` | 监听地址 |
-| `MCP_API_KEY` | — | 客户端必须用 `Authorization: Bearer <key>` 携带的共享密钥。**留空则禁用鉴权**（仅本地开发用，启动时会打 WARNING）。生成方式：`node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"` |
+| `MCP_API_KEY` | — | 单条 Bearer 密钥，内部 label 标记为 `DEFAULT`。**所有 `MCP_API_KEY*` 全部留空则禁用鉴权**（仅本地开发用，启动时打 WARNING）。生成方式：`node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"` |
+| `MCP_API_KEY_<LABEL>` | — | 带 label 的 Bearer 密钥，可声明任意条；`<LABEL>` 是 env 变量名后缀（推荐大写字母 / 数字 / 下划线），命中时会作为 label 出现在日志里。可与 `MCP_API_KEY` 混用 |
 | `TZ` | `Asia/Shanghai` | 容器与 Node 进程时区 |
 | `QWEATHER_API_HOST` | — | 和风天气 API Host（账号专属子域名） |
 | `QWEATHER_API_KEY` | — | 和风天气 API Key |
 | `QWEATHER_API_DEFAULT_LOCATION` | `116.41,39.92` | 默认位置（坐标或 LocationID） |
 
 > 监听相关变量加 `MCP_` 前缀，避免与 `.env` 里其他常见名（`HOST`、`PORT`、`KEY`）冲突。
+
+### 多 key 分发与轮换
+
+把不同 key 发给不同群体，便于按群体做流量审计与定向 rotate。`.env` 写法：
+
+```env
+MCP_API_KEY_PUBLIC=<32 字节随机串>
+MCP_API_KEY_FRIENDS=<32 字节随机串>
+MCP_API_KEY_DND_GROUP=<32 字节随机串>
+MCP_API_KEY_NYAACAT_INNER=<32 字节随机串>
+```
+
+每条配置成一条独立的有效 key，`<LABEL>` 部分（`PUBLIC` / `FRIENDS` / …）会出现在服务端日志里：
+
+```
+[mcp] auth ok via PUBLIC (tools/call)
+[mcp] auth ok via DND_GROUP (tools/list)
+```
+
+**操作要点：**
+
+- **新增**：在 `.env` 加一行 `MCP_API_KEY_<新 LABEL>=<新 key>`，`docker compose up -d --force-recreate` 即生效（不烘进镜像，不需 rebuild）
+- **轮换**：把对应行的值换成新生成的随机串，`force-recreate` 一次；只有 label 对应的群体受影响，别的 key 不动
+- **吊销**：在 `.env` 里把对应行注释掉或删除，`force-recreate`；那条 key 立即失效，其他 key 不受影响
+- **审计**：`docker logs nyaachat-mcp | grep "auth ok via"` 可按 label 看各群体的调用量
+- 旧的 `MCP_API_KEY=` 仍兼容，被视为 label = `DEFAULT`，可与 `MCP_API_KEY_*` 混用
 
 ## 3.7 国家 / 省份映射表
 

@@ -6,23 +6,72 @@ import { createMcpServer, SERVER_NAME, SERVER_VERSION } from './server.js';
 
 const PORT = Number(process.env.MCP_PORT ?? 3094);
 const HOST = process.env.MCP_HOST ?? '0.0.0.0';
-const API_KEY = process.env.MCP_API_KEY?.trim() || null;
 const MCP_PATH = '/mcp';
 
-function checkAuth(req: Request): boolean {
-  if (!API_KEY) return true;
+interface ApiKeyEntry {
+  label: string;
+  key: string;
+}
+
+function loadApiKeys(): ApiKeyEntry[] {
+  const entries: ApiKeyEntry[] = [];
+  const seen = new Set<string>();
+
+  const legacy = process.env.MCP_API_KEY?.trim();
+  if (legacy) {
+    entries.push({ label: 'DEFAULT', key: legacy });
+    seen.add(legacy);
+  }
+
+  for (const [name, raw] of Object.entries(process.env)) {
+    if (!name.startsWith('MCP_API_KEY_')) continue;
+    const value = raw?.trim();
+    if (!value) continue;
+    if (seen.has(value)) continue;
+    const label = name.slice('MCP_API_KEY_'.length);
+    if (!label) continue;
+    entries.push({ label, key: value });
+    seen.add(value);
+  }
+  return entries;
+}
+
+const API_KEYS = loadApiKeys();
+
+function matchApiKey(provided: string): ApiKeyEntry | null {
+  const a = Buffer.from(provided);
+  for (const entry of API_KEYS) {
+    const b = Buffer.from(entry.key);
+    if (a.length !== b.length) continue;
+    if (timingSafeEqual(a, b)) return entry;
+  }
+  return null;
+}
+
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      apiKeyLabel?: string;
+    }
+  }
+}
+
+function checkAuth(req: Request): { ok: true; label: string | null } | { ok: false } {
+  if (API_KEYS.length === 0) return { ok: true, label: null };
   const header = req.headers.authorization;
-  if (!header) return false;
+  if (!header) return { ok: false };
   const match = /^Bearer\s+(\S+)\s*$/i.exec(header);
-  if (!match) return false;
-  const provided = Buffer.from(match[1]);
-  const expected = Buffer.from(API_KEY);
-  if (provided.length !== expected.length) return false;
-  return timingSafeEqual(provided, expected);
+  if (!match) return { ok: false };
+  const entry = matchApiKey(match[1]);
+  if (!entry) return { ok: false };
+  return { ok: true, label: entry.label };
 }
 
 function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  if (checkAuth(req)) {
+  const result = checkAuth(req);
+  if (result.ok) {
+    if (result.label) req.apiKeyLabel = result.label;
     next();
     return;
   }
@@ -43,6 +92,14 @@ app.get('/health', (_req, res) => {
 app.use(MCP_PATH, requireAuth);
 
 app.post(MCP_PATH, async (req: Request, res: Response) => {
+  if (req.apiKeyLabel) {
+    const method =
+      typeof req.body === 'object' && req.body && 'method' in req.body
+        ? String((req.body as { method?: unknown }).method ?? '')
+        : '';
+    console.log(`[mcp] auth ok via ${req.apiKeyLabel}${method ? ` (${method})` : ''}`);
+  }
+
   const server = createMcpServer();
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 
@@ -77,14 +134,18 @@ app.get(MCP_PATH, methodNotAllowed);
 app.delete(MCP_PATH, methodNotAllowed);
 
 const httpServer = app.listen(PORT, HOST, () => {
-  const authState = API_KEY
-    ? `auth=enabled (Bearer, ${API_KEY.length} chars)`
-    : 'auth=DISABLED — set MCP_API_KEY to require Bearer token';
+  let authState: string;
+  if (API_KEYS.length === 0) {
+    authState = 'auth=DISABLED — set MCP_API_KEY (or MCP_API_KEY_<LABEL>) to require Bearer token';
+  } else {
+    const labels = API_KEYS.map((e) => e.label).join(', ');
+    authState = `auth=enabled (${API_KEYS.length} key${API_KEYS.length > 1 ? 's' : ''}: ${labels})`;
+  }
   console.log(
     `[${SERVER_NAME}] v${SERVER_VERSION} listening on http://${HOST}:${PORT}${MCP_PATH} | ${authState}`,
   );
-  if (!API_KEY) {
-    console.warn(`[${SERVER_NAME}] WARNING: MCP_API_KEY is not set — endpoint is open to the public.`);
+  if (API_KEYS.length === 0) {
+    console.warn(`[${SERVER_NAME}] WARNING: no API keys configured — endpoint is open to the public.`);
   }
 });
 
