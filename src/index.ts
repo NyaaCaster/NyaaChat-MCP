@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { timingSafeEqual } from 'node:crypto';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { createMcpServer, SERVER_NAME, SERVER_VERSION } from './server.js';
 
 const PORT = Number(process.env.MCP_PORT ?? 3094);
@@ -91,14 +92,81 @@ app.get('/health', (_req, res) => {
 
 app.use(MCP_PATH, requireAuth);
 
+const sseSessions = new Map<string, SSEServerTransport>();
+
+function logAuth(req: Request, transport: 'sse' | 'streamable-http', method?: string): void {
+  if (!req.apiKeyLabel) return;
+  const tail = method ? ` (${method})` : '';
+  console.log(`[mcp] auth ok via ${req.apiKeyLabel} [${transport}]${tail}`);
+}
+
+app.get(MCP_PATH, async (req: Request, res: Response) => {
+  logAuth(req, 'sse');
+
+  const server = createMcpServer();
+  const transport = new SSEServerTransport(MCP_PATH, res);
+  const sessionId = transport.sessionId;
+  sseSessions.set(sessionId, transport);
+
+  const cleanup = () => {
+    if (sseSessions.get(sessionId) === transport) {
+      sseSessions.delete(sessionId);
+    }
+    void transport.close();
+    void server.close();
+  };
+  res.on('close', cleanup);
+
+  try {
+    await server.connect(transport);
+  } catch (err) {
+    console.error('[mcp] sse connect failed:', err);
+    cleanup();
+    if (!res.headersSent) {
+      res.status(500).end();
+    }
+  }
+});
+
 app.post(MCP_PATH, async (req: Request, res: Response) => {
-  if (req.apiKeyLabel) {
+  const sessionId =
+    typeof req.query.sessionId === 'string' ? req.query.sessionId : undefined;
+
+  if (sessionId) {
+    const transport = sseSessions.get(sessionId);
+    if (!transport) {
+      res.status(404).json({
+        jsonrpc: '2.0',
+        error: { code: -32004, message: 'Unknown sessionId' },
+        id: null,
+      });
+      return;
+    }
     const method =
       typeof req.body === 'object' && req.body && 'method' in req.body
         ? String((req.body as { method?: unknown }).method ?? '')
         : '';
-    console.log(`[mcp] auth ok via ${req.apiKeyLabel}${method ? ` (${method})` : ''}`);
+    logAuth(req, 'sse', method);
+    try {
+      await transport.handlePostMessage(req, res, req.body);
+    } catch (err) {
+      console.error('[mcp] sse post failed:', err);
+      if (!res.headersSent) {
+        res.status(500).json({
+          jsonrpc: '2.0',
+          error: { code: -32603, message: 'Internal server error' },
+          id: null,
+        });
+      }
+    }
+    return;
   }
+
+  const method =
+    typeof req.body === 'object' && req.body && 'method' in req.body
+      ? String((req.body as { method?: unknown }).method ?? '')
+      : '';
+  logAuth(req, 'streamable-http', method);
 
   const server = createMcpServer();
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
@@ -123,15 +191,13 @@ app.post(MCP_PATH, async (req: Request, res: Response) => {
   }
 });
 
-const methodNotAllowed = (_req: Request, res: Response) => {
+app.delete(MCP_PATH, (_req: Request, res: Response) => {
   res.status(405).json({
     jsonrpc: '2.0',
     error: { code: -32000, message: 'Method not allowed.' },
     id: null,
   });
-};
-app.get(MCP_PATH, methodNotAllowed);
-app.delete(MCP_PATH, methodNotAllowed);
+});
 
 const httpServer = app.listen(PORT, HOST, () => {
   let authState: string;
@@ -142,7 +208,7 @@ const httpServer = app.listen(PORT, HOST, () => {
     authState = `auth=enabled (${API_KEYS.length} key${API_KEYS.length > 1 ? 's' : ''}: ${labels})`;
   }
   console.log(
-    `[${SERVER_NAME}] v${SERVER_VERSION} listening on http://${HOST}:${PORT}${MCP_PATH} | ${authState}`,
+    `[${SERVER_NAME}] v${SERVER_VERSION} listening on http://${HOST}:${PORT}${MCP_PATH} | transports=streamable-http+sse | ${authState}`,
   );
   if (API_KEYS.length === 0) {
     console.warn(`[${SERVER_NAME}] WARNING: no API keys configured — endpoint is open to the public.`);
@@ -151,6 +217,10 @@ const httpServer = app.listen(PORT, HOST, () => {
 
 const shutdown = (signal: string) => {
   console.log(`[${SERVER_NAME}] received ${signal}, shutting down...`);
+  for (const t of sseSessions.values()) {
+    void t.close();
+  }
+  sseSessions.clear();
   httpServer.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 5000).unref();
 };

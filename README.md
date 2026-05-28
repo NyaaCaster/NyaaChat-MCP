@@ -12,7 +12,7 @@
 - `draw_tarot`（显示名"塔罗牌"）— 韦特塔罗（单张/三张/凯尔特十字）
 - `draw_qian`（显示名"抽签"）— 关帝灵签 100 签（项目内置摘录版）
 
-服务通过 **Streamable HTTP** 单端点对外暴露，兼容 Chatbox / Cherry Studio / SillyTavern 等远程 MCP 客户端。
+服务通过单端点 `/mcp` 同时支持 **Streamable HTTP** 与 **SSE** 两种传输，兼容 Chatbox / Cherry Studio / SillyTavern 等远程 MCP 客户端，按客户端能力任选其一。
 
 > 文档分三部分：[LLM 侧接入](#一llm-侧接入) → [角色扮演使用准则](#二角色扮演场景下的数据使用准则) → [技术文档](#三技术文档)。普通使用者只看第一、二部分即可。
 
@@ -26,7 +26,7 @@
 http://h.hony-wen.com:3094/mcp
 ```
 
-公开开放，**Streamable HTTP** 协议（MCP 2025-03-26 标准）。
+公开开放，**Streamable HTTP** 与 **SSE** 双协议（同一 URL，按 HTTP method 自动区分；前者 MCP 2025-03-26 标准，后者保留是为了兼容仅支持 SSE 的旧客户端）。
 
 ## 鉴权
 
@@ -59,7 +59,7 @@ HTTP 401
 
 ### Chatbox / Cherry Studio
 
-设置 → MCP 服务器 → 添加 → 类型选 **Streamable HTTP**：
+设置 → MCP 服务器 → 添加 → 类型选 **Streamable HTTP**（首选）：
 
 ```
 URL:     http://h.hony-wen.com:3094/mcp
@@ -68,17 +68,45 @@ Headers: Authorization: Bearer xxxxxx
 
 如果界面上没有"Headers"字段而只有单独的"API Key"输入框，多数情况下填 `xxxxxx`，客户端会自动以 `Authorization: Bearer xxxxxx` 形式发出。
 
+如果你的客户端只支持 SSE（type: `sse`），URL 同样填 `http://h.hony-wen.com:3094/mcp`，header 同上即可——服务端在同一端点上自动按 HTTP method 区分两种 transport。
+
 ### SillyTavern
 
-安装 MCP Connector 扩展，类型选 `streamable-http`，URL 同上，在自定义 header 里加：
+安装 MCP Connector 扩展，类型选 `streamable-http`（或 `sse`，两者均可），URL 同上，在自定义 header 里加：
 
 ```
 Authorization: Bearer xxxxxx
 ```
 
+### JSON 配置示例
+
+很多客户端使用 JSON 描述 MCP server。两种 transport 任选其一：
+
+**Streamable HTTP（推荐）：**
+```json
+{
+  "transport": "streamable_http",
+  "url": "http://h.hony-wen.com:3094/mcp",
+  "headers": { "Authorization": "Bearer xxxxxx" },
+  "timeout": 5,
+  "sse_read_timeout": 300
+}
+```
+
+**SSE（兼容旧客户端）：**
+```json
+{
+  "transport": "sse",
+  "url": "http://h.hony-wen.com:3094/mcp",
+  "headers": { "Authorization": "Bearer xxxxxx" },
+  "timeout": 5,
+  "sse_read_timeout": 300
+}
+```
+
 ### 其它通用 MCP 客户端
 
-支持 Streamable HTTP 传输 + 自定义 header（或 Bearer token）的客户端均可直接接入。无需 OAuth、无需注册。
+支持 Streamable HTTP 或 SSE 传输 + 自定义 header（或 Bearer token）的客户端均可直接接入。无需 OAuth、无需注册。
 
 ### 健康检查
 
@@ -603,7 +631,8 @@ get_weather({location: "广西"})
 ## 3.1 架构
 
 ```
-LLM 客户端  ──HTTP POST /mcp──▶  Express  ──▶  StreamableHTTPServerTransport
+LLM 客户端  ──HTTP /mcp──▶  Express  ──▶  StreamableHTTPServerTransport (POST 无 sessionId)
+                                  └─▶  SSEServerTransport (GET 长连 + POST?sessionId=…)
                                                        │
                                               ┌────────┴────────┐
                                               ▼                 ▼
@@ -617,8 +646,13 @@ LLM 客户端  ──HTTP POST /mcp──▶  Express  ──▶  StreamableHTTP
                                                     (地名 → tz / id)
 ```
 
-- **传输层**：MCP 2025-03-26 标准 [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports)，单端点 `/mcp`。
-- **会话模式**：无状态（stateless）——每个 POST 独立创建 server + transport，不维护 session id。水平扩展无负担。
+- **传输层**：单端点 `/mcp`，同时支持
+  - [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports)（MCP 2025-03-26 标准，首选）：客户端 `POST /mcp`，服务端按需以 SSE 或单一 JSON 响应。
+  - 旧式 [HTTP+SSE](https://modelcontextprotocol.io/specification/2024-11-05/basic/transports)（兼容仅支持 SSE 的客户端）：客户端 `GET /mcp` 建立 SSE 长连，服务端通过 `event: endpoint` 告知回投 URL `/mcp?sessionId=<uuid>`，客户端再 `POST /mcp?sessionId=<uuid>` 投递 JSON-RPC 消息。
+  - 服务端按 HTTP method（以及 POST 是否带 `sessionId` query）自动分流，无需客户端额外指定。
+- **会话模式**：
+  - Streamable HTTP 走无状态路径——每个 POST 独立创建 server + transport，不留 session。
+  - SSE 路径必然带 sessionId：每条 SSE 长连对应一组 server + transport，存活到客户端断开为止；进程内 `Map<sessionId, transport>` 路由 POST 回投。多副本部署时若用 SSE，需要 sticky session（按 sessionId 路由到同一实例）。
 - **运行时**：Node 20+，依赖 `@modelcontextprotocol/sdk@^1.29` + Express。
 - **上游**：[timeapi.io](https://www.timeapi.io)（无鉴权 HTTP）+ [和风天气](https://dev.qweather.com)（API Key）。
 
@@ -639,7 +673,7 @@ LLM 客户端  ──HTTP POST /mcp──▶  Express  ──▶  StreamableHTTP
 
 ```
 src/
-├── index.ts              # HTTP 入口（Express + StreamableHTTPServerTransport）
+├── index.ts              # HTTP 入口（Express + Streamable HTTP / SSE 双 transport）
 ├── server.ts             # McpServer 工厂，注册所有工具
 ├── tools/
 │   ├── time.ts           # get_current_time（timeapi.io + GeoAPI 兜底）
