@@ -14,4 +14,9 @@ services:
       - .env
     ports:
       - "3094:3094"
+    volumes:
+      - qinyapi-cache:/app/data
     restart: unless-stopped
+
+volumes:
+  qinyapi-cache:

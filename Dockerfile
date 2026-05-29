@@ -30,6 +30,10 @@ ENV NODE_ENV=production \
     MCP_PORT=3094 \
     MCP_HOST=0.0.0.0
 
+# Cache dir for qinyapi capability probes; backed by a named volume in compose.
+# Created (and chowned) before dropping privileges so the node user can write.
+RUN mkdir -p /app/data && chown node:node /app/data
+
 # Run as the non-root user provided by the node image
 USER node
 

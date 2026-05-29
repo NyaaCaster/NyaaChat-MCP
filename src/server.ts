@@ -8,6 +8,7 @@ import { registerFlipCoinTool } from './tools/coin.js';
 import { registerCastIchingTool } from './tools/iching.js';
 import { registerDrawTarotTool } from './tools/tarot.js';
 import { registerDrawQianTool } from './tools/qian.js';
+import { registerQinyHealthTool } from './tools/qinyapi.js';
 
 export const SERVER_NAME = 'nyaachat-mcp';
 export const SERVER_VERSION = '0.1.0';
@@ -27,6 +28,7 @@ export function createMcpServer(): McpServer {
   registerCastIchingTool(server);
   registerDrawTarotTool(server);
   registerDrawQianTool(server);
+  registerQinyHealthTool(server);
 
   return server;
 }
