@@ -92,6 +92,14 @@ app.get('/health', (_req, res) => {
 
 app.use(MCP_PATH, requireAuth);
 
+// Some clients (e.g. AstrBot, whose MCP layer connects via the legacy SSE
+// client `mcp/client/sse.py`) establish the connection with GET /mcp and send
+// messages back via POST /mcp?sessionId=... . We keep that transport working,
+// but emit periodic SSE keepalive comments so an idle stream never hits the
+// client's read timeout — otherwise the client's SSE reader can spin into a
+// CPU-burning busy-loop after ReadTimeout. Streamable HTTP clients (POST
+// without a sessionId) are handled in the POST branch below.
+const SSE_KEEPALIVE_MS = 15_000;
 const sseSessions = new Map<string, SSEServerTransport>();
 
 function logAuth(req: Request, transport: 'sse' | 'streamable-http', method?: string): void {
@@ -108,7 +116,15 @@ app.get(MCP_PATH, async (req: Request, res: Response) => {
   const sessionId = transport.sessionId;
   sseSessions.set(sessionId, transport);
 
+  // SSE comment frames (lines starting with ':') are ignored by clients but
+  // keep bytes flowing so the connection's read timeout never fires while idle.
+  const keepalive = setInterval(() => {
+    if (!res.writableEnded) res.write(': keepalive\n\n');
+  }, SSE_KEEPALIVE_MS);
+  keepalive.unref();
+
   const cleanup = () => {
+    clearInterval(keepalive);
     if (sseSessions.get(sessionId) === transport) {
       sseSessions.delete(sessionId);
     }
@@ -132,6 +148,11 @@ app.post(MCP_PATH, async (req: Request, res: Response) => {
   const sessionId =
     typeof req.query.sessionId === 'string' ? req.query.sessionId : undefined;
 
+  const method =
+    typeof req.body === 'object' && req.body && 'method' in req.body
+      ? String((req.body as { method?: unknown }).method ?? '')
+      : '';
+
   if (sessionId) {
     const transport = sseSessions.get(sessionId);
     if (!transport) {
@@ -142,10 +163,6 @@ app.post(MCP_PATH, async (req: Request, res: Response) => {
       });
       return;
     }
-    const method =
-      typeof req.body === 'object' && req.body && 'method' in req.body
-        ? String((req.body as { method?: unknown }).method ?? '')
-        : '';
     logAuth(req, 'sse', method);
     try {
       await transport.handlePostMessage(req, res, req.body);
@@ -162,10 +179,6 @@ app.post(MCP_PATH, async (req: Request, res: Response) => {
     return;
   }
 
-  const method =
-    typeof req.body === 'object' && req.body && 'method' in req.body
-      ? String((req.body as { method?: unknown }).method ?? '')
-      : '';
   logAuth(req, 'streamable-http', method);
 
   const server = createMcpServer();
