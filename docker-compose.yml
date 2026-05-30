@@ -14,9 +14,8 @@ services:
       - .env
     ports:
       - "3094:3094"
+    # qinyapi 能力探测缓存：绑定挂载到项目内 ./data，落地为真实文件
+    # （data/ 已在 .gitignore 排除）。删卷不会丢，rebuild 也不丢。
     volumes:
-      - qinyapi-cache:/app/data
+      - ./data:/app/data
     restart: unless-stopped
-
-volumes:
-  qinyapi-cache:
