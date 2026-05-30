@@ -199,43 +199,12 @@ async function probeFormat(baseUrl: string, key: string, model: string): Promise
   }
 }
 
-function modelsUrl(baseUrl: string): string {
-  return baseUrl.replace(/\/chat\/completions\/?$/, '/models');
-}
-
-async function probeContextOutput(
-  baseUrl: string,
-  key: string,
-  model: string,
-): Promise<{ contextK: number | null; maxOutputK: number | null }> {
-  try {
-    const res = await fetch(modelsUrl(baseUrl), {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' },
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-    });
-    if (res.ok) {
-      const json: any = await res.json();
-      const list: any[] = Array.isArray(json?.data) ? json.data : [];
-      const hit = list.find((m) => m?.id === model);
-      if (hit) {
-        const ctx =
-          hit.context_length ?? hit.context_window ?? hit.max_context_tokens ?? null;
-        const out = hit.max_output_tokens ?? hit.max_tokens ?? null;
-        const contextK = typeof ctx === 'number' ? Math.round(ctx / 1000) : null;
-        const maxOutputK = typeof out === 'number' ? Math.round(out / 1000) : null;
-        if (contextK || maxOutputK) {
-          const fb = knownMeta(model);
-          return {
-            contextK: contextK ?? fb?.contextK ?? null,
-            maxOutputK: maxOutputK ?? fb?.maxOutputK ?? null,
-          };
-        }
-      }
-    }
-  } catch {
-    // fall through to known-model table
-  }
+// 上下文 / 最大输出长度来源说明：
+// 实测本网关的 GET /v1/models 只返回 id / owned_by / supported_endpoint_types，
+// 不含 context_length / max_output_tokens 等尺寸字段，发请求拿不到任何尺寸信息。
+// 为「最低成本」，这里不再发那次无效的网络请求，直接查内置静态表 knownMeta（零开销）。
+// 该结果会随能力一起入库缓存，后续命中缓存的模型不会重复计算。
+function contextOutput(model: string): { contextK: number | null; maxOutputK: number | null } {
   const fb = knownMeta(model);
   return { contextK: fb?.contextK ?? null, maxOutputK: fb?.maxOutputK ?? null };
 }
@@ -253,11 +222,11 @@ export async function probeCapabilities(
   key: string,
   model: string,
 ): Promise<Capabilities> {
-  const [vision, tool, format, ctxOut] = await Promise.all([
+  const [vision, tool, format] = await Promise.all([
     probeVision(baseUrl, key, model),
     probeTool(baseUrl, key, model),
     probeFormat(baseUrl, key, model),
-    probeContextOutput(baseUrl, key, model),
   ]);
-  return { vision, tool, format, contextK: ctxOut.contextK, maxOutputK: ctxOut.maxOutputK };
+  const { contextK, maxOutputK } = contextOutput(model);
+  return { vision, tool, format, contextK, maxOutputK };
 }

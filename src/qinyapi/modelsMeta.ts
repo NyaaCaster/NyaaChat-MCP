@@ -14,22 +14,36 @@ export function normalize(s: string): string {
     .replace(/^-|-$/g, '');
 }
 
-// Chinese nicknames users say instead of brand names. Replaced with a
+// Chinese / shorthand nicknames users say instead of brand names. Replaced with a
 // space-padded canonical token so it survives later whitespace tokenization.
 // Order matters: longer aliases first so "克劳德" wins over bare "克".
 const CLAUDE_ALIASES = /克劳德|克总|小克|克/g;
 const GEMINI_ALIASES = /哈基米/g;
+const GROK_ALIASES = /马叔叔|老马|小马哥|车神/g;
+const DEEPSEEK_ALIASES = /DS|ds|D老师|D指导|鲸鱼娘|鱼娘娘/g;
 
-// For model queries: "哈基米" means the tavern's default gemini specifically
+// For model queries: nicknames map to the brand prefix that appears in model ids
+// (grok-*, deepseek-*), space-padded so a trailing version sticks as its own token
+// (e.g. "dsv4" → " deepseek v4" → [deepseek, v4] → matches deepseek-v4 / -v4-pro).
+// "哈基米" is special: it means the tavern's default gemini specifically
 // (gemini-2.5-pro), per the product rule "哈基米/2.5 只测默认组 gemini-2.5-pro".
 function expandModelAliases(q: string): string {
-  return q.replace(CLAUDE_ALIASES, ' claude ').replace(GEMINI_ALIASES, ' gemini-2.5-pro ');
+  return q
+    .replace(CLAUDE_ALIASES, ' claude ')
+    .replace(GEMINI_ALIASES, ' gemini-2.5-pro ')
+    .replace(GROK_ALIASES, ' grok ')
+    .replace(DEEPSEEK_ALIASES, ' deepseek ');
 }
 
 // For group queries: nicknames map to the brand token that appears in group
 // names, with no padding (group matching does substring, not tokenization).
+// grok/deepseek nicknames both point at "DS&Grok组" (normalized "ds&grok").
 function expandGroupAliases(q: string): string {
-  return q.replace(CLAUDE_ALIASES, 'claude').replace(GEMINI_ALIASES, 'gemini');
+  return q
+    .replace(CLAUDE_ALIASES, 'claude')
+    .replace(GEMINI_ALIASES, 'gemini')
+    .replace(GROK_ALIASES, 'grok')
+    .replace(DEEPSEEK_ALIASES, 'ds');
 }
 
 // A model matches a query if EVERY whitespace-separated token of the

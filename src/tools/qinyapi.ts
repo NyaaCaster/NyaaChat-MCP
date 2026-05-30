@@ -4,6 +4,7 @@ import { loadQinyConfig, type QinyConfig, type QinyGroup } from '../qinyapi/conf
 import { groupMatches, modelMatches } from '../qinyapi/modelsMeta.js';
 import { cacheKey, readCache, writeEntry, type CacheEntry } from '../qinyapi/cache.js';
 import { probeCapabilities, probeConnectivity } from '../qinyapi/probe.js';
+import { BAN_MESSAGE, isBanned } from '../qinyapi/banlist.js';
 
 const DEFAULT_MODEL = 'gemini-2.5-pro';
 const RECOMMEND_TEXT = '酒馆推荐用默认组gemini-2.5-pro模型';
@@ -29,6 +30,18 @@ function ctxLine(caps: CacheEntry | null): string {
 
 function err(text: string) {
   return { isError: true as const, content: [{ type: 'text' as const, text }] };
+}
+
+// 响应时间：毫秒转秒，最多保留 2 位小数（去掉末尾多余的 0），如 0.42 / 1.2 / 3。
+function fmtSeconds(ms: number): string {
+  return parseFloat((ms / 1000).toFixed(2)).toString();
+}
+
+// 黑名单跳过提示：列出被跳过的模型（按 id 去重）+ 固定吐槽文本。
+function bannedNote(banned: Pair[]): string {
+  const models = [...new Set(banned.map((b) => b.model))];
+  const lines = models.map((m) => `  - ${m}`);
+  return ['🚫 已跳过（黑名单，未测试）：', ...lines, BAN_MESSAGE].join('\n');
 }
 
 function text(t: string) {
@@ -64,6 +77,9 @@ export function registerQinyHealthTool(server: McpServer): void {
         '- "哈基米/2.5是不是挂了" → only 默认组 gemini-2.5-pro is tested.\n' +
         '- "有没有能用的模型" → call with no args; only 默认组 gemini-2.5-pro is tested + a recommendation.\n' +
         '- "能查询哪些模型" → call with list=true.\n' +
+        'Some old / deprecated models are blacklisted: they are never probed (zero cost); a query ' +
+        'hitting only blacklisted models returns a canned refusal, and mixed queries test the good ' +
+        'ones then append the skip notice.\n' +
         'If the group / model does not exist (or is not offered), an error message is returned.',
       inputSchema: {
         group: z
@@ -123,11 +139,18 @@ export function registerQinyHealthTool(server: McpServer): void {
 
       if (pairs.length === 0) return err(NAME_ERROR);
 
+      // 黑名单拦截：命中的模型在任何探测之前剔除（零成本），不进测试流程。
+      const banned = pairs.filter((p) => isBanned(p.model));
+      const testable = pairs.filter((p) => !isBanned(p.model));
+
+      // 全部命中黑名单 → 不测试，直接回吐槽文本。
+      if (testable.length === 0) return text(bannedNote(banned));
+
       const cache = await readCache();
       const now = new Date().toISOString();
 
       const results = await Promise.all(
-        pairs.map(async ({ group: g, model: m }) => {
+        testable.map(async ({ group: g, model: m }) => {
           const conn = await probeConnectivity(config.baseUrl, g.key, m);
           const key = cacheKey(g.name, m);
           let caps: CacheEntry | null = cache[key] ?? null;
@@ -149,13 +172,14 @@ export function registerQinyHealthTool(server: McpServer): void {
       const blocks = results.map((r) => {
         const head = `【${r.g.name} / ${r.m}】`;
         const conn = r.conn.ok
-          ? `  连接：✅ 响应 ${r.conn.latencyMs}ms`
+          ? `  连接：✅ 响应 ${fmtSeconds(r.conn.latencyMs)}s`
           : `  连接：❌ ${r.conn.error ?? '失败'}`;
         return [head, conn, capLine(r.caps), ctxLine(r.caps)].join('\n');
       });
 
       let out = blocks.join('\n\n');
       if (recommend) out += `\n\n${RECOMMEND_TEXT}`;
+      if (banned.length) out += `\n\n${bannedNote(banned)}`;
       return text(out);
     },
   );
