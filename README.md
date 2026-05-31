@@ -1,6 +1,6 @@
 # NyaaChat-MCP
 
-为 [NyaaChat](https://github.com/NyaaCaster/NyaaChat) 等基于 LLM 的角色扮演聊天平台提供标准 [MCP](https://modelcontextprotocol.io/) 支持的轻量服务。当前提供十个工具：
+为 [NyaaChat](https://github.com/NyaaCaster/NyaaChat) 等基于 LLM 的角色扮演聊天平台提供标准 [MCP](https://modelcontextprotocol.io/) 支持的轻量服务。当前提供十一个工具：
 
 - `get_current_time`（显示名"真实时间"）— 获取实际当前时间
 - `get_weather`（显示名"实时天气"）— 获取实时天气
@@ -12,6 +12,7 @@
 - `draw_tarot`（显示名"塔罗牌"）— 韦特塔罗（单张/三张/凯尔特十字）
 - `draw_qian`（显示名"抽签"）— 关帝灵签 100 签（项目内置摘录版）
 - `qinyapi_health_check`（显示名"qinyapi 模型健康测试"）— qinyapi 令牌分组 + 模型健康测试（运维工具，非 RP）
+- `web_search`（显示名"网络搜索"）— 经自建 SearXNG 元搜索的通用网络搜索
 
 服务通过单端点 `/mcp` 同时支持 **Streamable HTTP** 与 **SSE** 两种传输，兼容 Chatbox / Cherry Studio / SillyTavern 等远程 MCP 客户端，按客户端能力任选其一。
 
@@ -24,7 +25,7 @@
 ## 服务地址
 
 ```
-http://h.hony-wen.com:3094/mcp
+http://h.nyaa.host:3094/mcp
 ```
 
 公开开放，**Streamable HTTP** 与 **SSE** 双协议（同一 URL，按 HTTP method 自动区分；前者 MCP 2025-03-26 标准，后者保留是为了兼容仅支持 SSE 的旧客户端）。
@@ -42,7 +43,7 @@ Authorization: Bearer xxxxxx
 请求示例：
 
 ```bash
-curl -X POST http://h.hony-wen.com:3094/mcp \
+curl -X POST http://h.nyaa.host:3094/mcp \
   -H "Authorization: Bearer xxxxxx" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -63,13 +64,13 @@ HTTP 401
 设置 → MCP 服务器 → 添加 → 类型选 **Streamable HTTP**（首选）：
 
 ```
-URL:     http://h.hony-wen.com:3094/mcp
+URL:     http://h.nyaa.host:3094/mcp
 Headers: Authorization: Bearer xxxxxx
 ```
 
 如果界面上没有"Headers"字段而只有单独的"API Key"输入框，多数情况下填 `xxxxxx`，客户端会自动以 `Authorization: Bearer xxxxxx` 形式发出。
 
-如果你的客户端只支持 SSE（type: `sse`），URL 同样填 `http://h.hony-wen.com:3094/mcp`，header 同上即可——服务端在同一端点上自动按 HTTP method 区分两种 transport。
+如果你的客户端只支持 SSE（type: `sse`），URL 同样填 `http://h.nyaa.host:3094/mcp`，header 同上即可——服务端在同一端点上自动按 HTTP method 区分两种 transport。
 
 ### SillyTavern
 
@@ -87,7 +88,7 @@ Authorization: Bearer xxxxxx
 ```json
 {
   "transport": "streamable_http",
-  "url": "http://h.hony-wen.com:3094/mcp",
+  "url": "http://h.nyaa.host:3094/mcp",
   "headers": { "Authorization": "Bearer xxxxxx" },
   "timeout": 5,
   "sse_read_timeout": 300
@@ -98,7 +99,7 @@ Authorization: Bearer xxxxxx
 ```json
 {
   "transport": "sse",
-  "url": "http://h.hony-wen.com:3094/mcp",
+  "url": "http://h.nyaa.host:3094/mcp",
   "headers": { "Authorization": "Bearer xxxxxx" },
   "timeout": 5,
   "sse_read_timeout": 300
@@ -114,9 +115,34 @@ Authorization: Bearer xxxxxx
 不需要鉴权，可用于先验证 URL 可达：
 
 ```
-GET http://h.hony-wen.com:3094/health
+GET http://h.nyaa.host:3094/health
 → {"status":"ok","name":"nyaachat-mcp","version":"0.1.0"}
 ```
+
+### 按连接选择启用的工具（可选）
+
+某些客户端（如部分 SillyTavern 的 MCP 插件）**没有逐个工具开关的 UI**。本服务支持**仅通过接入 JSON 本身**控制这条连接暴露哪些工具——不写任何相关字段时**默认全部启用**（与上面的配置完全一致），向后兼容。
+
+三条通道，优先级 **`X-MCP-Tools` 头 > `?tools=` > `?disable=`**：
+
+| 方式 | 写法 | 含义 |
+|---|---|---|
+| URL 白名单 | `"url": ".../mcp?tools=draw_tarot,roll_dice,roll_coc"` | 只启用列出的工具，其余全关 |
+| URL 黑名单 | `"url": ".../mcp?disable=get_weather,web_search"` | 关掉列出的工具，其余全开 |
+| 头 + JSON 映射 | `"headers": { "X-MCP-Tools": "{\"get_weather\":false}" }` | 逐个 `true`/`false`；含 `true` 项→只开 true 的，全为 `false`→只关 false 的 |
+
+完整示例（只给某张克苏鲁 RP 角色卡开掷骰类工具）：
+```json
+{
+  "transport": "streamable_http",
+  "url": "http://h.nyaa.host:3094/mcp?tools=roll_coc,roll_dice",
+  "headers": { "Authorization": "Bearer xxxxxx" }
+}
+```
+
+被禁用的工具不会出现在 `tools/list` 里，LLM 自然不会调用；即便强行调用也只会收到 `Tool not found`。工具名以[工具一览](#工具一览)表格里的 `name`（英文蛇形）为准。**容错**：写错的工具名会被忽略；若过滤后一个都不剩，会**回退为全部启用**（避免一个 typo 把所有工具干掉）。
+
+> ⚠️ 这是**省上下文 / 便利性**的过滤，不是安全边界——谁拿到 key 都能改这些参数。要"某个 key 只能用某几个工具"的硬性限制是另一套服务端策略，不在此列。
 
 ## 工具一览
 
@@ -134,8 +160,9 @@ GET http://h.hony-wen.com:3094/health
 | `draw_tarot` | 塔罗牌 |
 | `draw_qian` | 抽签 |
 | `qinyapi_health_check` | qinyapi 模型健康测试 |
+| `web_search` | 网络搜索 |
 
-> 九个工具相互独立，各自启用/禁用互不影响。RP 用户可以只启用与角色背景契合的工具子集——例如克苏鲁兵团 RP 只开 `roll_coc` + `roll_dice`、欧美奇幻 RP 开 `roll_dnd` + `draw_tarot`、东方修仙/玄学 RP 开 `cast_iching` + `draw_qian`——避免无关工具的描述与 schema 占用 LLM 上下文造成注意力偏移。
+> 十一个工具相互独立，各自启用/禁用互不影响。RP 用户可以只启用与角色背景契合的工具子集——例如克苏鲁兵团 RP 只开 `roll_coc` + `roll_dice`、欧美奇幻 RP 开 `roll_dnd` + `draw_tarot`、东方修仙/玄学 RP 开 `cast_iching` + `draw_qian`——避免无关工具的描述与 schema 占用 LLM 上下文造成注意力偏移。
 
 ### `get_current_time` · 真实时间
 
@@ -199,7 +226,7 @@ Current time in America/New_York (UTC-04:00):
 
 **调用示例：**
 ```bash
-curl -X POST http://h.hony-wen.com:3094/mcp \
+curl -X POST http://h.nyaa.host:3094/mcp \
   -H "Authorization: Bearer xxxxxx" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -225,7 +252,7 @@ D&D 5e d20 检定 / 豁免 / 攻击骰。
 
 **调用示例（祝福术下的优势攻击 vs DC 15）：**
 ```bash
-curl -X POST http://h.hony-wen.com:3094/mcp \
+curl -X POST http://h.nyaa.host:3094/mcp \
   -H "Authorization: Bearer xxxxxx" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -285,7 +312,7 @@ CoC 7e 百分骰技能检定（**点数越低越好**）。
 
 **调用示例（技能 60，1 个奖励骰）：**
 ```bash
-curl -X POST http://h.hony-wen.com:3094/mcp \
+curl -X POST http://h.nyaa.host:3094/mcp \
   -H "Authorization: Bearer xxxxxx" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -327,7 +354,7 @@ CoC 技能检定（技能值 60，奖励骰 ×1）
 
 **调用示例（5 枚硬币）：**
 ```bash
-curl -X POST http://h.hony-wen.com:3094/mcp \
+curl -X POST http://h.nyaa.host:3094/mcp \
   -H "Authorization: Bearer xxxxxx" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -355,7 +382,7 @@ curl -X POST http://h.hony-wen.com:3094/mcp \
 
 **调用示例：**
 ```bash
-curl -X POST http://h.hony-wen.com:3094/mcp \
+curl -X POST http://h.nyaa.host:3094/mcp \
   -H "Authorization: Bearer xxxxxx" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -394,7 +421,7 @@ curl -X POST http://h.hony-wen.com:3094/mcp \
 
 **调用示例（三张牌阵带问题）：**
 ```bash
-curl -X POST http://h.hony-wen.com:3094/mcp \
+curl -X POST http://h.nyaa.host:3094/mcp \
   -H "Authorization: Bearer xxxxxx" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -434,7 +461,7 @@ curl -X POST http://h.hony-wen.com:3094/mcp \
 
 **调用示例：**
 ```bash
-curl -X POST http://h.hony-wen.com:3094/mcp \
+curl -X POST http://h.nyaa.host:3094/mcp \
   -H "Authorization: Bearer xxxxxx" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -494,6 +521,31 @@ curl -X POST http://h.hony-wen.com:3094/mcp \
 ```
 
 > 分组名与模型列表是目录元数据，维护在版本管理的 `src/qinyapi/groups.ts`（含每组对应的 `keyEnv`）；真正的 apikey 放在 `.env` 的 `QINYAPI_KEY_*`，按 `keyEnv` 关联，未设置某 key 时该分组自动不可用。详见 [§3.6](#36-环境变量)。
+
+### `web_search` · 网络搜索
+
+经自建 [SearXNG](https://docs.searxng.org/) 元搜索实例的**通用网络搜索**，聚合 Google / Bing / DuckDuckGo / 维基百科等多引擎结果，返回标题 + 链接 + 摘要的纯文本，供 LLM 获取自身不掌握的实时 / 最新信息。**通用工具，第二部分 RP 准则不适用**——结果如何融入对话由 LLM 侧自行决定（可作为事实引用或附带出处链接）。
+
+**入参：**
+- `query` —— **必填**，搜索关键词。
+- `count` —— 可选，返回结果条数，默认 `5`，自动收敛到 `1..10`。
+- `language` —— 可选，结果语言，如 `zh-CN` / `en` / `ja`；省略用实例默认（全语言）。
+- `time_range` —— 可选，限定时效窗口：`day` / `week` / `month` / `year`，查新闻 / 时效性话题有用。
+- `categories` —— 可选，SearXNG 分类过滤，如 `general` / `news` / `science` / `it` / `images`；省略用默认（general）。
+
+**返回示例：**
+```
+关于 "OpenAI 最新模型" 的网络搜索结果（约 1240 条，取前 3 条）：
+
+1. OpenAI 发布 GPT 系列最新版本
+   https://example.com/openai-latest
+   官方公告称新模型在推理与多模态上显著提升……
+   （来源：google）
+
+2. ...
+```
+
+> 后端地址由 `.env` 的 `SEARXNG_URL` 配置，默认已硬编码指向自建实例，开箱即用；超时由 `SEARXNG_TIMEOUT_MS` 控制（默认 8000ms）。详见 [§3.6](#36-环境变量)。
 
 ---
 
@@ -718,6 +770,7 @@ LLM 客户端  ──HTTP /mcp──▶  Express  ──▶  StreamableHTTPServe
 src/
 ├── index.ts              # HTTP 入口（Express + Streamable HTTP / SSE 双 transport）
 ├── server.ts             # McpServer 工厂，注册所有工具
+├── toolFilter.ts         # 按连接解析启用工具子集（X-MCP-Tools / ?tools= / ?disable=）
 ├── tools/
 │   ├── time.ts           # get_current_time（timeapi.io + GeoAPI 兜底）
 │   ├── weather.ts        # get_weather（/v7/weather/now + GeoAPI 解析）
@@ -728,7 +781,8 @@ src/
 │   ├── iching.ts         # cast_iching（易经三钱法起卦）
 │   ├── tarot.ts          # draw_tarot（韦特塔罗）
 │   ├── qian.ts           # draw_qian（关帝灵签摘录版）
-│   └── qinyapi.ts        # qinyapi_health_check（健康测试 + 昵称解析）
+│   ├── qinyapi.ts        # qinyapi_health_check（健康测试 + 昵称解析）
+│   └── websearch.ts      # web_search（SearXNG 元搜索）
 ├── dice/
 │   ├── parser.ts         # 表达式解析（通用 + DnD 专用变体）
 │   └── roller.ts         # crypto.randomInt 安全随机源
@@ -808,6 +862,8 @@ bash ./rebuild.sh
 | `QINYAPI_BASE_URL` | 见 `groups.ts` | qinyapi 端点覆盖（默认值在 `src/qinyapi/groups.ts`） |
 | `QINYAPI_KEY_<LABEL>` | — | qinyapi 各令牌分组的 apikey；`<LABEL>` 与 `groups.ts` 里各组的 `keyEnv` 对应（如 `QINYAPI_KEY_DEFAULT` / `QINYAPI_KEY_AWS`）。未设置则该分组不可用 |
 | `QINYAPI_CACHE_FILE` | `<cwd>/data/qinyapi-cache.json` | 能力探测缓存文件路径；容器内默认 `/app/data/qinyapi-cache.json`（命名卷持久化） |
+| `SEARXNG_URL` | `http://j.hony-wen.com:1441/search` | `web_search` 的 SearXNG 后端地址（`format=json`）；默认已硬编码自建实例，仅需指向自己的实例时才覆盖 |
+| `SEARXNG_TIMEOUT_MS` | `8000` | `web_search` 单次请求超时（毫秒） |
 
 > 监听相关变量加 `MCP_` 前缀，避免与 `.env` 里其他常见名（`HOST`、`PORT`、`KEY`）冲突。
 

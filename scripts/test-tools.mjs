@@ -1,7 +1,8 @@
 import 'dotenv/config';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { createMcpServer } from '../dist/server.js';
+import { createMcpServer, ALL_TOOL_NAMES } from '../dist/server.js';
+import { resolveEnabledTools } from '../dist/toolFilter.js';
 
 const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
@@ -71,6 +72,10 @@ const cases = [
   { name: 'qinyapi_health_check', args: { group: '不存在的组xyz' }, label: '错误：分组名不存在', expectError: true },
   { name: 'qinyapi_health_check', args: { model: '根本没有的模型zzz' }, label: '错误：模型名不存在', expectError: true },
   { name: 'qinyapi_health_check', args: { group: 'aws组', model: '根本没有的模型zzz' }, label: '错误：分组下无匹配模型', expectError: true },
+
+  // === web_search（仅离线错误路径，不联网）===
+  { name: 'web_search', args: { query: '' }, label: '空查询（应错）', expectError: true },
+  { name: 'web_search', args: { query: '   ' }, label: '纯空白查询（应错）', expectError: true },
 ];
 
 let pass = 0;
@@ -93,7 +98,57 @@ for (const c of cases) {
   }
 }
 
-console.log(`\n=== ${pass} pass / ${fail} fail / ${cases.length} total ===`);
+// === 工具过滤：resolveEnabledTools 纯函数（不联网）===
+const N = ALL_TOOL_NAMES.length;
+const has = (set, ...names) =>
+  set instanceof Set && names.every((n) => set.has(n)) && set.size === names.length;
+const filterCases = [
+  { label: '三者皆无 → undefined（全开）', ok: () => resolveEnabledTools({}, ALL_TOOL_NAMES) === undefined },
+  { label: 'tools 白名单', ok: () => has(resolveEnabledTools({ tools: 'roll_dice,draw_tarot' }, ALL_TOOL_NAMES), 'roll_dice', 'draw_tarot') },
+  { label: 'disable 黑名单', ok: () => { const s = resolveEnabledTools({ disable: 'get_weather' }, ALL_TOOL_NAMES); return s instanceof Set && s.size === N - 1 && !s.has('get_weather'); } },
+  { label: '头 JSON 混合 true/false → 白名单取 true', ok: () => has(resolveEnabledTools({ header: '{"roll_dice":true,"get_weather":false}' }, ALL_TOOL_NAMES), 'roll_dice') },
+  { label: '头 JSON 全 false → 黑名单', ok: () => { const s = resolveEnabledTools({ header: '{"get_weather":false,"web_search":false}' }, ALL_TOOL_NAMES); return s instanceof Set && s.size === N - 2 && !s.has('get_weather') && !s.has('web_search'); } },
+  { label: '头逗号串 → 退化白名单', ok: () => has(resolveEnabledTools({ header: 'roll_dice, draw_tarot' }, ALL_TOOL_NAMES), 'roll_dice', 'draw_tarot') },
+  { label: '头空对象 {} → undefined（全开）', ok: () => resolveEnabledTools({ header: '{}' }, ALL_TOOL_NAMES) === undefined },
+  { label: '未知名丢弃后仍有效', ok: () => has(resolveEnabledTools({ tools: 'roll_dice,根本没有的xyz' }, ALL_TOOL_NAMES), 'roll_dice') },
+  { label: '全是未知名 → 空集回退 undefined', ok: () => resolveEnabledTools({ tools: 'aaa,bbb' }, ALL_TOOL_NAMES) === undefined },
+  { label: '优先级 header > tools', ok: () => has(resolveEnabledTools({ header: '{"draw_tarot":true}', tools: 'roll_dice' }, ALL_TOOL_NAMES), 'draw_tarot') },
+];
+for (const c of filterCases) {
+  let ok = false;
+  try { ok = !!c.ok(); } catch (e) { ok = false; }
+  if (ok) pass++; else fail++;
+  console.log(`\n[${ok ? 'PASS' : 'FAIL'}] resolveEnabledTools: ${c.label}`);
+}
+
+// === 工具过滤：in-memory 子集 server（不联网）===
+{
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  const subServer = createMcpServer({ enabledTools: new Set(['roll_dice', 'draw_tarot']) });
+  await subServer.connect(st);
+  const subClient = new Client({ name: 'filter-client', version: '0.0.1' }, { capabilities: {} });
+  await subClient.connect(ct);
+
+  const listed = (await subClient.listTools()).tools.map((t) => t.name).sort();
+  const listOk = listed.length === 2 && listed.includes('roll_dice') && listed.includes('draw_tarot');
+  if (listOk) pass++; else fail++;
+  console.log(`\n[${listOk ? 'PASS' : 'FAIL'}] 子集 server tools/list = [${listed.join(', ')}]（期望 draw_tarot, roll_dice）`);
+
+  let blocked = false;
+  try {
+    const r = await subClient.callTool({ name: 'get_weather', arguments: {} });
+    blocked = !!r.isError; // 未注册 → isError "Tool not found"
+  } catch {
+    blocked = true; // 或协议层抛错
+  }
+  if (blocked) pass++; else fail++;
+  console.log(`\n[${blocked ? 'PASS' : 'FAIL'}] 调用被禁用的 get_weather → 被拒（isError / method-not-found）`);
+
+  await subClient.close();
+  await subServer.close();
+}
+
+console.log(`\n=== ${pass} pass / ${fail} fail / ${pass + fail} total ===`);
 
 await client.close();
 await server.close();

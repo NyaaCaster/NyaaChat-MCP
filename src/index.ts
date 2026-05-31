@@ -3,7 +3,8 @@ import { timingSafeEqual } from 'node:crypto';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
-import { createMcpServer, SERVER_NAME, SERVER_VERSION } from './server.js';
+import { ALL_TOOL_NAMES, createMcpServer, SERVER_NAME, SERVER_VERSION } from './server.js';
+import { resolveEnabledTools, X_MCP_TOOLS_HEADER } from './toolFilter.js';
 
 const PORT = Number(process.env.MCP_PORT ?? 3094);
 const HOST = process.env.MCP_HOST ?? '0.0.0.0';
@@ -108,10 +109,40 @@ function logAuth(req: Request, transport: 'sse' | 'streamable-http', method?: st
   console.log(`[mcp] auth ok via ${req.apiKeyLabel} [${transport}]${tail}`);
 }
 
-app.get(MCP_PATH, async (req: Request, res: Response) => {
-  logAuth(req, 'sse');
+/** Coerce an Express header/query value (string | string[] | undefined) to a string. */
+function firstStr(v: unknown): string | undefined {
+  if (typeof v === 'string') return v;
+  if (Array.isArray(v) && typeof v[0] === 'string') return v[0];
+  return undefined;
+}
 
-  const server = createMcpServer();
+/**
+ * Resolve the per-connection enabled-tool set from the request's
+ * `X-MCP-Tools` header / `?tools=` / `?disable=` (see src/toolFilter.ts).
+ * Returns undefined when all tools should be enabled.
+ */
+function enabledFromReq(req: Request): Set<string> | undefined {
+  return resolveEnabledTools(
+    {
+      header: firstStr(req.headers[X_MCP_TOOLS_HEADER]),
+      tools: firstStr(req.query.tools),
+      disable: firstStr(req.query.disable),
+    },
+    ALL_TOOL_NAMES,
+  );
+}
+
+/** Human-readable tool-count tag for logs, e.g. "tools=2/11" or "tools=all". */
+function describeEnabled(enabled: Set<string> | undefined): string {
+  return enabled ? `tools=${enabled.size}/${ALL_TOOL_NAMES.length}` : 'tools=all';
+}
+
+app.get(MCP_PATH, async (req: Request, res: Response) => {
+  const enabledTools = enabledFromReq(req);
+  logAuth(req, 'sse');
+  if (req.apiKeyLabel) console.log(`[mcp] ${describeEnabled(enabledTools)} [sse]`);
+
+  const server = createMcpServer({ enabledTools });
   const transport = new SSEServerTransport(MCP_PATH, res);
   const sessionId = transport.sessionId;
   sseSessions.set(sessionId, transport);
@@ -181,7 +212,10 @@ app.post(MCP_PATH, async (req: Request, res: Response) => {
 
   logAuth(req, 'streamable-http', method);
 
-  const server = createMcpServer();
+  const enabledTools = enabledFromReq(req);
+  if (req.apiKeyLabel) console.log(`[mcp] ${describeEnabled(enabledTools)} [streamable-http]`);
+
+  const server = createMcpServer({ enabledTools });
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 
   res.on('close', () => {

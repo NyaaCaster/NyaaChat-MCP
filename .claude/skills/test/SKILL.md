@@ -12,7 +12,7 @@ NyaaChat-MCP 的工具验收脚本调用规范。
 | 脚本 | 用途 | 是否需要 Docker | 是否需要 API key | 何时用 |
 |---|---|---|---|---|
 | `scripts/test-tools.mjs` | 用 MCP SDK 的 `InMemoryTransport` 直接连 client + server，走完整 `tools/call` 协议 | 否 | 否 | 改完 `src/` 跑 typecheck + build 之后立即用，验证 register / handler / schema 是否正确 |
-| `scripts/test-public.mjs` | 通过 `Authorization: Bearer` 调公网 `http://h.hony-wen.com:3094/mcp` | 是（要先 rebuild 部署） | 是（从 `.env` 读取） | rebuild + 重启容器之后做部署烟雾测试 |
+| `scripts/test-public.mjs` | 通过 `Authorization: Bearer` 调公网 `http://h.nyaa.host:3094/mcp` | 是（要先 rebuild 部署） | 是（从 `.env` 读取） | rebuild + 重启容器之后做部署烟雾测试 |
 
 **原则**：本地代码改动先用 `test-tools.mjs` 跑通，再走 rebuild + `test-public.mjs`。不要颠倒。
 
@@ -36,7 +36,7 @@ npm run build && node scripts/test-tools.mjs
 
 ### `test-public.mjs`（公网烟雾测试）
 
-前置：容器在跑（`curl http://h.hony-wen.com:3094/health` 返回 `status: ok`），`.env` 里有 `MCP_API_KEY`。
+前置：容器在跑（`curl http://h.nyaa.host:3094/health` 返回 `status: ok`），`.env` 里有 `MCP_API_KEY`。
 
 **绝不在脚本里硬编码 key。** 通过环境变量传入，命令一次性使用。
 
