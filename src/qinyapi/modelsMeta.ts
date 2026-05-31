@@ -74,15 +74,48 @@ export function groupMatches(groupName: string, query: string): boolean {
 }
 
 // Static, well-known context / max-output sizes (in K tokens).
-// Only a fallback for when the gateway's /v1/models metadata is unavailable.
-// Matched by checking whether the normalized model name contains a key.
+// The gateway's GET /v1/models does NOT expose any size fields (verified), so these
+// are the sole source of truth for context / max-output — not a mere fallback.
+// Matched by checking whether the normalized model name CONTAINS a key, returning the
+// FIRST hit. Order therefore matters: list longer / more-specific keys before shorter
+// ones that would also match (e.g. 'grok-420' before 'grok-4'; the dated initial
+// 'claude-opus-4' last, after the 4-5/4-6/4-7/4-8 variants).
+// 注：标「待核实」者为按模型族推测的合理值（本网关无法查证），如有准确数据请订正。
 const KNOWN_META: Array<{ match: string; meta: ModelMeta }> = [
-  { match: 'claude-opus-4', meta: { contextK: 200, maxOutputK: 64 } },
-  { match: 'claude-sonnet-4', meta: { contextK: 200, maxOutputK: 64 } },
+  // Claude — opus 4.5+ 输出上限 64K；初代 opus-4 (20250514) 仅 32K，故置于变体之后。
+  { match: 'claude-opus-4-5', meta: { contextK: 200, maxOutputK: 64 } },
+  { match: 'claude-opus-4-6', meta: { contextK: 200, maxOutputK: 64 } },
+  { match: 'claude-opus-4-7', meta: { contextK: 200, maxOutputK: 64 } },
+  { match: 'claude-opus-4-8', meta: { contextK: 200, maxOutputK: 64 } },
+  { match: 'claude-opus-4', meta: { contextK: 200, maxOutputK: 32 } },
+  { match: 'claude-sonnet-4', meta: { contextK: 200, maxOutputK: 64 } }, // 含 4 / 4-5 / 4-6
+  { match: 'claude-haiku-4-5', meta: { contextK: 200, maxOutputK: 64 } },
+  { match: 'claude-3-7-sonnet', meta: { contextK: 200, maxOutputK: 64 } },
+  { match: 'claude-3-5-sonnet', meta: { contextK: 200, maxOutputK: 8 } },
+  // Gemini — 1M 上下文，64K 输出。3-5-flash / 3-1-pro 须在 3-pro / 3-flash 之前。
   { match: 'gemini-2-5-pro', meta: { contextK: 1000, maxOutputK: 64 } },
-  { match: 'gemini-3-1-pro', meta: { contextK: 1000, maxOutputK: 64 } },
+  { match: 'gemini-2-5-flash', meta: { contextK: 1000, maxOutputK: 64 } },
   { match: 'gemini-3-5-flash', meta: { contextK: 1000, maxOutputK: 64 } },
+  { match: 'gemini-3-1-pro', meta: { contextK: 1000, maxOutputK: 64 } },
+  { match: 'gemini-3-pro', meta: { contextK: 1000, maxOutputK: 64 } },
+  { match: 'gemini-3-flash', meta: { contextK: 1000, maxOutputK: 64 } },
+  // GPT-5 系（含 mini / codex / 各 effort 档）。gpt-image-2 不含 'gpt-5'，不会误命中。
+  { match: 'gpt-5', meta: { contextK: 400, maxOutputK: 128 } }, // 待核实
+  // Grok — 'grok-420' 须在 'grok-4' 之前（后者是前者子串）。
   { match: 'grok-420', meta: { contextK: 128, maxOutputK: 32 } },
+  { match: 'grok-4', meta: { contextK: 256, maxOutputK: 64 } }, // 待核实
+  { match: 'grok-3', meta: { contextK: 128, maxOutputK: 32 } }, // 待核实
+  // DeepSeek
+  { match: 'deepseek-r1', meta: { contextK: 64, maxOutputK: 64 } }, // 待核实
+  { match: 'deepseek-v4', meta: { contextK: 128, maxOutputK: 8 } }, // 待核实
+  { match: 'deepseek-v3', meta: { contextK: 128, maxOutputK: 8 } }, // 含 v3 / v3.2，待核实
+  // GLM — 'glm-5' 命中 5 / 5.1。
+  { match: 'glm-5', meta: { contextK: 200, maxOutputK: 32 } }, // 待核实
+  { match: 'glm-4-7', meta: { contextK: 200, maxOutputK: 32 } }, // 待核实
+  // Kimi — 'kimi-k2' 命中 k2-thinking / k2.5 / k2.6。
+  { match: 'kimi-k2', meta: { contextK: 256, maxOutputK: 32 } }, // 待核实
+  // MiniMax
+  { match: 'minimax-m2', meta: { contextK: 200, maxOutputK: 32 } }, // 待核实
 ];
 
 export function knownMeta(modelName: string): ModelMeta | null {

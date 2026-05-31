@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { loadQinyConfig, type QinyConfig, type QinyGroup } from '../qinyapi/config.js';
-import { groupMatches, modelMatches } from '../qinyapi/modelsMeta.js';
+import { groupMatches, modelMatches, knownMeta } from '../qinyapi/modelsMeta.js';
 import { cacheKey, readCache, writeEntry, type CacheEntry } from '../qinyapi/cache.js';
 import { probeCapabilities, probeConnectivity } from '../qinyapi/probe.js';
+import { staticCaps } from '../qinyapi/capsTable.js';
 import { BAN_MESSAGE, isBanned } from '../qinyapi/banlist.js';
 
 const DEFAULT_MODEL = 'gemini-2.5-pro';
@@ -16,15 +17,20 @@ interface Pair {
   model: string;
 }
 
-function capLine(caps: CacheEntry | null): string {
+// 能力三项只读 vision/tool/format，来源可能是静态表、运行时缓存或实测，故用宽松类型。
+type Caps = { vision: boolean; tool: boolean; format: boolean };
+
+function capLine(caps: Caps | null): string {
   if (!caps) return '  能力：❓未知（连接失败，无法探测）';
   const mark = (ok: boolean) => (ok ? '✅' : '❌');
   return `  能力：👁视觉${mark(caps.vision)}  🔧工具${mark(caps.tool)}  📄格式化${mark(caps.format)}`;
 }
 
-function ctxLine(caps: CacheEntry | null): string {
-  const ctx = caps?.contextK != null ? `${caps.contextK}K` : '未知';
-  const out = caps?.maxOutputK != null ? `${caps.maxOutputK}K` : '未知';
+// 尺寸单一事实源 = modelsMeta.ts 的 knownMeta（与分组无关、零成本查表）。
+function ctxLine(model: string): string {
+  const meta = knownMeta(model);
+  const ctx = meta ? `${meta.contextK}K` : '未知';
+  const out = meta ? `${meta.maxOutputK}K` : '未知';
   return `  📥上下文：${ctx}   📤最大输出：${out}`;
 }
 
@@ -153,12 +159,14 @@ export function registerQinyHealthTool(server: McpServer): void {
         testable.map(async ({ group: g, model: m }) => {
           const conn = await probeConnectivity(config.baseUrl, g.key, m);
           const key = cacheKey(g.name, m);
-          let caps: CacheEntry | null = cache[key] ?? null;
+          // 能力优先级：静态表（零成本）→ 运行时缓存 → 连接成功才实测兜底。
+          let caps: Caps | null = staticCaps(g.name, m) ?? cache[key] ?? null;
           let newEntry: { key: string; entry: CacheEntry } | null = null;
           if (!caps && conn.ok) {
             const c = await probeCapabilities(config.baseUrl, g.key, m);
-            caps = { ...c, probedAt: now };
-            newEntry = { key, entry: caps };
+            const entry: CacheEntry = { ...c, probedAt: now };
+            caps = entry;
+            newEntry = { key, entry };
           }
           return { g, m, conn, caps, newEntry };
         }),
@@ -174,7 +182,7 @@ export function registerQinyHealthTool(server: McpServer): void {
         const conn = r.conn.ok
           ? `  连接：✅ 响应 ${fmtSeconds(r.conn.latencyMs)}s`
           : `  连接：❌ ${r.conn.error ?? '失败'}`;
-        return [head, conn, capLine(r.caps), ctxLine(r.caps)].join('\n');
+        return [head, conn, capLine(r.caps), ctxLine(r.m)].join('\n');
       });
 
       let out = blocks.join('\n\n');
