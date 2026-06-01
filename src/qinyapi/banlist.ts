@@ -71,7 +71,9 @@ export const BANNED_MODELS: ReadonlySet<string> = new Set<string>([
   'grok-420-thinking',
   'kimi-k2-thinking',
   'K次claude-opus-4-5-20251101',
+  'K次claude-opus-4-6',
   'K次claude-sonnet-4-5-20250929',
+  'K次claude-sonnet-4-6',
 ]);
 
 export function isBanned(model: string): boolean {
