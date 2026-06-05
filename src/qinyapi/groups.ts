@@ -103,8 +103,12 @@ export const QINY_GROUP_CATALOG: QinyGroupCatalog[] = [
   {
     name: 'ClaudeCode组',
     keyEnv: 'QINYAPI_KEY_CLAUDECODE',
-    // GET /v1/models 返回空列表（HTTP 200）；该组当前不公开可探测的模型清单。
-    models: [],
+    models: [
+      'claude-opus-4-6',
+      'claude-opus-4-7',
+      'claude-opus-4-8',
+      'claude-sonnet-4-6',
+    ],
   },
   {
     name: 'GCP组',
@@ -160,19 +164,6 @@ export const QINY_GROUP_CATALOG: QinyGroupCatalog[] = [
       'kimi-k2.5',
       'kimi-k2.6',
       'MiniMax-M2.5',
-    ],
-  },
-  {
-    name: '限时特价CC纯MAX号池组',
-    keyEnv: 'QINYAPI_KEY_CC_MAX',
-    models: [
-      'claude-haiku-4-5-20251001',
-      'claude-opus-4-5-20251101',
-      'claude-opus-4-6',
-      'claude-opus-4-7',
-      'claude-sonnet-4-5-20250929',
-      'claude-sonnet-4-5-20250929-thinking',
-      'claude-sonnet-4-6',
     ],
   },
   {
