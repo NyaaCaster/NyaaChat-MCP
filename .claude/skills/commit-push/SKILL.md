@@ -87,6 +87,7 @@ EOF
 - 默认目标：`origin master`（仓库唯一活跃分支）。
 - 推送前**必须**与用户二次确认，特别是包含：构建配置、Dockerfile、`docker-compose.yml`、依赖锁文件、大量删除的提交。
 - 标准命令：`git push origin master`。
+- **Windows / Session 0 已知坑**：若 `git push` 报 `could not read Username` / `wincredman` / `A specified logon session does not exist`，是 Claude Code 跑在 Session 0、DPAPI/Git Credential Manager 取不到凭据所致——不要在 `credsStore` / git config 上纠缠。直接用 `windows-user-session-runner` skill 把 `git push origin master` 包进 `schtasks /it`（用户交互会话 Session 1）执行。
 - 推送完成后跑一次 `git status` 验证本地与远端一致。
 
 ## 绝不提交（pre-check 清单）
