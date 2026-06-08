@@ -67,12 +67,6 @@ const cases = [
   { name: 'draw_qian', args: {}, label: '抽签（再来一次）' },
   { name: 'draw_qian', args: {}, label: '抽签（第三次）' },
 
-  // === qinyapi_health_check (仅离线解析错误路径 + 列表，不联网) ===
-  { name: 'qinyapi_health_check', args: { list: true }, label: '列出可查询分组与模型' },
-  { name: 'qinyapi_health_check', args: { group: '不存在的组xyz' }, label: '错误：分组名不存在', expectError: true },
-  { name: 'qinyapi_health_check', args: { model: '根本没有的模型zzz' }, label: '错误：模型名不存在', expectError: true },
-  { name: 'qinyapi_health_check', args: { group: 'aws组', model: '根本没有的模型zzz' }, label: '错误：分组下无匹配模型', expectError: true },
-
   // === web_search（仅离线错误路径，不联网）===
   { name: 'web_search', args: { query: '' }, label: '空查询（应错）', expectError: true },
   { name: 'web_search', args: { query: '   ' }, label: '纯空白查询（应错）', expectError: true },

@@ -8,7 +8,6 @@ import { registerFlipCoinTool } from './tools/coin.js';
 import { registerCastIchingTool } from './tools/iching.js';
 import { registerDrawTarotTool } from './tools/tarot.js';
 import { registerDrawQianTool } from './tools/qian.js';
-import { registerQinyHealthTool } from './tools/qinyapi.js';
 import { registerWebSearchTool } from './tools/websearch.js';
 
 export const SERVER_NAME = 'nyaachat-mcp';
@@ -30,7 +29,6 @@ const TOOL_REGISTRY: ReadonlyArray<{ name: string; register: (s: McpServer) => v
   { name: 'cast_iching', register: registerCastIchingTool },
   { name: 'draw_tarot', register: registerDrawTarotTool },
   { name: 'draw_qian', register: registerDrawQianTool },
-  { name: 'qinyapi_health_check', register: registerQinyHealthTool },
   { name: 'web_search', register: registerWebSearchTool },
 ];
 

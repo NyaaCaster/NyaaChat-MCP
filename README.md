@@ -1,6 +1,6 @@
 # NyaaChat-MCP
 
-为 [NyaaChat](https://github.com/NyaaCaster/NyaaChat) 等基于 LLM 的角色扮演聊天平台提供标准 [MCP](https://modelcontextprotocol.io/) 支持的轻量服务。当前提供十一个工具：
+为 [NyaaChat](https://github.com/NyaaCaster/NyaaChat) 等基于 LLM 的角色扮演聊天平台提供标准 [MCP](https://modelcontextprotocol.io/) 支持的轻量服务。当前提供十个工具：
 
 - `get_current_time`（显示名"真实时间"）— 获取实际当前时间
 - `get_weather`（显示名"实时天气"）— 获取实时天气
@@ -11,7 +11,6 @@
 - `cast_iching`（显示名"易经起卦"）— 易经三钱法起卦（本卦 + 之卦）
 - `draw_tarot`（显示名"塔罗牌"）— 韦特塔罗（单张/三张/凯尔特十字）
 - `draw_qian`（显示名"抽签"）— 关帝灵签 100 签（项目内置摘录版）
-- `qinyapi_health_check`（显示名"qinyapi 模型健康测试"）— qinyapi 令牌分组 + 模型健康测试（运维工具，非 RP）
 - `web_search`（显示名"网络搜索"）— 经自建 SearXNG 元搜索的通用网络搜索
 
 服务通过单端点 `/mcp` 同时支持 **Streamable HTTP** 与 **SSE** 两种传输，兼容 Chatbox / Cherry Studio / SillyTavern 等远程 MCP 客户端，按客户端能力任选其一。
@@ -159,10 +158,9 @@ GET http://h.nyaa.host:3094/health
 | `cast_iching` | 易经起卦 |
 | `draw_tarot` | 塔罗牌 |
 | `draw_qian` | 抽签 |
-| `qinyapi_health_check` | qinyapi 模型健康测试 |
 | `web_search` | 网络搜索 |
 
-> 十一个工具相互独立，各自启用/禁用互不影响。RP 用户可以只启用与角色背景契合的工具子集——例如克苏鲁兵团 RP 只开 `roll_coc` + `roll_dice`、欧美奇幻 RP 开 `roll_dnd` + `draw_tarot`、东方修仙/玄学 RP 开 `cast_iching` + `draw_qian`——避免无关工具的描述与 schema 占用 LLM 上下文造成注意力偏移。
+> 十个工具相互独立，各自启用/禁用互不影响。RP 用户可以只启用与角色背景契合的工具子集——例如克苏鲁兵团 RP 只开 `roll_coc` + `roll_dice`、欧美奇幻 RP 开 `roll_dnd` + `draw_tarot`、东方修仙/玄学 RP 开 `cast_iching` + `draw_qian`——避免无关工具的描述与 schema 占用 LLM 上下文造成注意力偏移。
 
 ### `get_current_time` · 真实时间
 
@@ -481,47 +479,6 @@ curl -X POST http://h.nyaa.host:3094/mcp \
 
 **等级分布**（项目内置版）：上上 10 / 上吉 20 / 中吉 30 / 中平 25 / 下下 15，比例参考传统但具体签号到等级的对应关系是项目内置分配。
 
-### `qinyapi_health_check` · qinyapi 模型健康测试
-
-针对 [qinyapi](https://love.qinyan.icu)（OpenAI 兼容聚合网关）的「令牌分组 + 模型」做健康检查。**运维 / 诊断工具，不参与角色扮演，第二部分 RP 准则不适用。** 返回：
-
-- **连接正常**（响应时间，✅ / ❌）—— 每次实时探测
-- **视觉 👁 / 工具调用 🔧 / 格式化输出 📄** —— 首次探测后写入本地缓存
-- **上下文长度 / 最大输出长度**（单位 K）—— 同样缓存
-
-> 能力与上下文 / 输出长度视为不变量：命中缓存直接返回，仅在缓存缺失时并发探测一次并落盘。缓存文件在容器内 `/app/data`，由命名卷持久化。所有状态标记仅用 emoji（不含图片 / SVG），便于在不支持富媒体的平台显示。
-
-**入参（均可选）：**
-- `group` —— 令牌分组名（如 `aws组`、`默认组`、`小克按次`）。可省略 `组` 字、支持昵称。省略则在所有分组中匹配。
-- `model` —— 模型名或昵称（如 `claude-opus-4-8`、`4.8`、`2.5`、`哈基米`、`小克`）。
-- `list` —— 为 `true` 时只列出全部可查询的分组与模型（markdown 无序列表），不做测试。
-
-**昵称 / 模糊匹配：**
-- `哈基米` → `gemini-2.5-pro`
-- `克劳德` / `小克` / `克总` / `克` → `claude`（家族，匹配所有 `claude-*`）
-- 分组名容忍缺少 `组` 后缀并支持上述昵称，例如 `小克按次` → `claude按次组`
-
-**查询语义：**
-
-| 用户说 | 行为 |
-|---|---|
-| 「aws的4.8能用吗」 | 仅用 `aws组` 的 key 测 `claude-opus-4-8` |
-| 「4.8能用吗」 | 测所有包含 `claude-opus-4-8` 的分组 |
-| 「哈基米 / 2.5 是不是挂了」 | 仅测 `默认组` 的 `gemini-2.5-pro` |
-| 「有没有能用的模型」 | 仅测 `默认组` 的 `gemini-2.5-pro`，并附「酒馆推荐用默认组 gemini-2.5-pro 模型」 |
-| 「能查询哪些模型」 | 列出全部可查询分组与模型 |
-| 分组名 / 模型名不存在 | 返回名称错误提示 |
-
-**返回示例：**
-```
-【aws组 / claude-opus-4-8】
-  连接：✅ 响应 1947ms
-  能力：👁视觉✅  🔧工具✅  📄格式化✅
-  📥上下文：200K   📤最大输出：64K
-```
-
-> 分组名与模型列表是目录元数据，维护在版本管理的 `src/qinyapi/groups.ts`（含每组对应的 `keyEnv`）；真正的 apikey 放在 `.env` 的 `QINYAPI_KEY_*`，按 `keyEnv` 关联，未设置某 key 时该分组自动不可用。详见 [§3.6](#36-环境变量)。
-
 ### `web_search` · 网络搜索
 
 经自建 [SearXNG](https://docs.searxng.org/) 元搜索实例的**通用网络搜索**，聚合 Google / Bing / DuckDuckGo / 维基百科等多引擎结果，返回标题 + 链接 + 摘要的纯文本，供 LLM 获取自身不掌握的实时 / 最新信息。**通用工具，第二部分 RP 准则不适用**——结果如何融入对话由 LLM 侧自行决定（可作为事实引用或附带出处链接）。
@@ -781,7 +738,6 @@ src/
 │   ├── iching.ts         # cast_iching（易经三钱法起卦）
 │   ├── tarot.ts          # draw_tarot（韦特塔罗）
 │   ├── qian.ts           # draw_qian（关帝灵签摘录版）
-│   ├── qinyapi.ts        # qinyapi_health_check（健康测试 + 昵称解析）
 │   └── websearch.ts      # web_search（SearXNG 元搜索）
 ├── dice/
 │   ├── parser.ts         # 表达式解析（通用 + DnD 专用变体）
@@ -790,19 +746,13 @@ src/
 │   ├── iching-data.ts    # 64 卦索引 → {卦序, 卦名}
 │   ├── tarot-data.ts     # 78 张牌数据 + 三种牌阵定义
 │   └── qian-data.ts      # 100 签 → 等级映射 + 等级通用指引
-├── qweather/
-│   ├── client.ts         # 共享 creds、HTTP wrapper、geoLookupOne
-│   ├── countries.ts      # 32 国别名 → 主城映射
-│   ├── provinces.ts      # 34 中国省级行政区 → 省会/首府映射
-│   └── regions.ts        # 统一 resolveRegionAlias（country ?? province）
-└── qinyapi/
-    ├── groups.ts         # 令牌分组「目录」：name / models / keyEnv（入库，无密钥）
-    ├── config.ts         # 合并 groups.ts + 环境变量里的 apikey
-    ├── modelsMeta.ts     # 昵称/模糊匹配 + 已知上下文/输出兜底表
-    ├── probe.ts          # 连接 / 视觉 / 工具 / 格式 / 上下文输出 探针
-    └── cache.ts          # 能力缓存读写（data/qinyapi-cache.json）
+└── qweather/
+    ├── client.ts         # 共享 creds、HTTP wrapper、geoLookupOne
+    ├── countries.ts      # 32 国别名 → 主城映射
+    ├── provinces.ts      # 34 中国省级行政区 → 省会/首府映射
+    └── regions.ts        # 统一 resolveRegionAlias（country ?? province）
 Dockerfile
-docker-compose.yml        # 含 qinyapi-cache 命名卷（挂载到 /app/data）
+docker-compose.yml
 rebuild.ps1 / rebuild.sh
 .env.example
 ```
@@ -859,9 +809,6 @@ bash ./rebuild.sh
 | `QWEATHER_API_HOST` | — | 和风天气 API Host（账号专属子域名） |
 | `QWEATHER_API_KEY` | — | 和风天气 API Key |
 | `QWEATHER_API_DEFAULT_LOCATION` | `116.41,39.92` | 默认位置（坐标或 LocationID） |
-| `QINYAPI_BASE_URL` | 见 `groups.ts` | qinyapi 端点覆盖（默认值在 `src/qinyapi/groups.ts`） |
-| `QINYAPI_KEY_<LABEL>` | — | qinyapi 各令牌分组的 apikey；`<LABEL>` 与 `groups.ts` 里各组的 `keyEnv` 对应（如 `QINYAPI_KEY_DEFAULT` / `QINYAPI_KEY_AWS`）。未设置则该分组不可用 |
-| `QINYAPI_CACHE_FILE` | `<cwd>/data/qinyapi-cache.json` | 能力探测缓存文件路径；容器内默认 `/app/data/qinyapi-cache.json`（命名卷持久化） |
 | `SEARXNG_URL` | `http://j.hony-wen.com:1441/search` | `web_search` 的 SearXNG 后端地址（`format=json`）；默认已硬编码自建实例，仅需指向自己的实例时才覆盖 |
 | `SEARXNG_TIMEOUT_MS` | `8000` | `web_search` 单次请求超时（毫秒） |
 
