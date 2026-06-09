@@ -11,7 +11,7 @@
 - `cast_iching`（显示名"易经起卦"）— 易经三钱法起卦（本卦 + 之卦）
 - `draw_tarot`（显示名"塔罗牌"）— 韦特塔罗（单张/三张/凯尔特十字）
 - `draw_qian`（显示名"抽签"）— 关帝灵签 100 签（项目内置摘录版）
-- `web_search`（显示名"网络搜索"）— 经自建 SearXNG 元搜索的通用网络搜索
+- `web_search`（显示名"网络搜索"）— 通用网络搜索（Tavily API / 自建 SearXNG 双后端，`.env` 开关切换）
 
 服务通过单端点 `/mcp` 同时支持 **Streamable HTTP** 与 **SSE** 两种传输，兼容 Chatbox / Cherry Studio / SillyTavern 等远程 MCP 客户端，按客户端能力任选其一。
 
@@ -481,28 +481,37 @@ curl -X POST http://h.nyaa.host:3094/mcp \
 
 ### `web_search` · 网络搜索
 
-经自建 [SearXNG](https://docs.searxng.org/) 元搜索实例的**通用网络搜索**，聚合 Google / Bing / DuckDuckGo / 维基百科等多引擎结果，返回标题 + 链接 + 摘要的纯文本，供 LLM 获取自身不掌握的实时 / 最新信息。**通用工具，第二部分 RP 准则不适用**——结果如何融入对话由 LLM 侧自行决定（可作为事实引用或附带出处链接）。
+**通用网络搜索**，供 LLM 获取自身不掌握的实时 / 最新信息。**通用工具，第二部分 RP 准则不适用**——结果如何融入对话由 LLM 侧自行决定（可作为事实引用或附带出处链接）。
+
+服务端支持两套后端，由 `.env` 的 `WEB_SEARCH_BACKEND` 在启动时选定（对客户端透明，工具名与入参不变）：
+
+| 后端 | 说明 |
+|---|---|
+| `tavily` | [Tavily](https://docs.tavily.com/) 搜索 API。支持多 API key 自动轮询：当前 key 遇额度耗尽（HTTP 432/433）、限流（429）或 key 无效（401）时自动切换下一个；附带 AI 生成的"即时答案" |
+| `searxng`（默认） | 自建 [SearXNG](https://docs.searxng.org/) 元搜索实例，聚合 Google / Bing / DuckDuckGo / 维基百科等多引擎结果，无需任何凭证 |
 
 **入参：**
 - `query` —— **必填**，搜索关键词。
 - `count` —— 可选，返回结果条数，默认 `5`，自动收敛到 `1..10`。
-- `language` —— 可选，结果语言，如 `zh-CN` / `en` / `ja`；省略用实例默认（全语言）。
-- `time_range` —— 可选，限定时效窗口：`day` / `week` / `month` / `year`，查新闻 / 时效性话题有用。
-- `categories` —— 可选，SearXNG 分类过滤，如 `general` / `news` / `science` / `it` / `images`；省略用默认（general）。
+- `language` —— 可选，结果语言，如 `zh-CN` / `en` / `ja`；**仅 SearXNG 后端生效**，Tavily 后端忽略。
+- `time_range` —— 可选，限定时效窗口：`day` / `week` / `month` / `year`，查新闻 / 时效性话题有用。两后端均支持。
+- `categories` —— 可选，分类过滤。SearXNG 后端接受 `general` / `news` / `science` / `it` / `images` 等；Tavily 后端仅 `news` / `finance` 有意义（映射为 topic），其余按 general 处理。
 
-**返回示例：**
+**返回示例（Tavily 后端）：**
 ```
-关于 "OpenAI 最新模型" 的网络搜索结果（约 1240 条，取前 3 条）：
+关于 "OpenAI 最新模型" 的网络搜索结果（5 条）：
+
+[即时答案] OpenAI 于近日发布了……
 
 1. OpenAI 发布 GPT 系列最新版本
    https://example.com/openai-latest
    官方公告称新模型在推理与多模态上显著提升……
-   （来源：google）
+   （来源：tavily）
 
 2. ...
 ```
 
-> 后端地址由 `.env` 的 `SEARXNG_URL` 配置，默认已硬编码指向自建实例，开箱即用；超时由 `SEARXNG_TIMEOUT_MS` 控制（默认 8000ms）。详见 [§3.6](#36-环境变量)。
+> 后端开关与凭证均在 `.env` 配置（`WEB_SEARCH_BACKEND` / `TAVILY_API_KEYS` / `SEARXNG_URL` 等），详见 [§3.6](#36-环境变量)。切换后端只需改 `.env` 并 `docker compose up -d --force-recreate`，无需重建镜像。
 
 ---
 
@@ -738,7 +747,7 @@ src/
 │   ├── iching.ts         # cast_iching（易经三钱法起卦）
 │   ├── tarot.ts          # draw_tarot（韦特塔罗）
 │   ├── qian.ts           # draw_qian（关帝灵签摘录版）
-│   └── websearch.ts      # web_search（SearXNG 元搜索）
+│   └── websearch.ts      # web_search（Tavily / SearXNG 双后端 + Tavily key 轮询）
 ├── dice/
 │   ├── parser.ts         # 表达式解析（通用 + DnD 专用变体）
 │   └── roller.ts         # crypto.randomInt 安全随机源
@@ -809,8 +818,11 @@ bash ./rebuild.sh
 | `QWEATHER_API_HOST` | — | 和风天气 API Host（账号专属子域名） |
 | `QWEATHER_API_KEY` | — | 和风天气 API Key |
 | `QWEATHER_API_DEFAULT_LOCATION` | `116.41,39.92` | 默认位置（坐标或 LocationID） |
-| `SEARXNG_URL` | `http://j.hony-wen.com:1441/search` | `web_search` 的 SearXNG 后端地址（`format=json`）；默认已硬编码自建实例，仅需指向自己的实例时才覆盖 |
-| `SEARXNG_TIMEOUT_MS` | `8000` | `web_search` 单次请求超时（毫秒） |
+| `WEB_SEARCH_BACKEND` | `searxng` | `web_search` 后端开关：`tavily` 或 `searxng`。启动时读取，切换后 `force-recreate` 即生效 |
+| `TAVILY_API_KEYS` | — | Tavily API key 列表，**逗号分隔**，按声明顺序轮询；`WEB_SEARCH_BACKEND=tavily` 时必填。轮询策略：401 永久禁用该 key，432/433（额度耗尽）冷却 24 小时，429（限流）冷却 60 秒 |
+| `TAVILY_TIMEOUT_MS` | `8000` | Tavily 单次请求超时（毫秒） |
+| `SEARXNG_URL` | `http://j.hony-wen.com:1441/search` | SearXNG 后端地址（`format=json`）；默认已硬编码自建实例，仅需指向自己的实例时才覆盖 |
+| `SEARXNG_TIMEOUT_MS` | `8000` | SearXNG 单次请求超时（毫秒） |
 
 > 监听相关变量加 `MCP_` 前缀，避免与 `.env` 里其他常见名（`HOST`、`PORT`、`KEY`）冲突。
 
