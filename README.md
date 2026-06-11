@@ -81,9 +81,21 @@ Authorization: Bearer xxxxxx
 
 ### JSON 配置示例
 
-很多客户端使用 JSON 描述 MCP server。两种 transport 任选其一：
+很多客户端使用 JSON 描述 MCP server，但字段名并不完全统一：有的用 `transport`，有的用 `type`；Streamable HTTP 也可能写成 `streamable_http`、`streamable-http` 或 `streamableHttp`。**核心信息始终是同一个 `/mcp` URL 和 `Authorization` header**，请按客户端文档选择字段名。
 
-**Streamable HTTP（推荐）：**
+**AstrBot：**
+```json
+{
+  "type": "streamableHttp",
+  "url": "http://h.nyaa.host:3094/mcp",
+  "headers": {
+    "Authorization": "Bearer xxxxxx"
+  }
+}
+```
+
+**常见通用写法（Streamable HTTP，推荐）：**
+
 ```json
 {
   "transport": "streamable_http",
@@ -94,7 +106,7 @@ Authorization: Bearer xxxxxx
 }
 ```
 
-**SSE（兼容旧客户端）：**
+**常见通用写法（SSE，兼容旧客户端）：**
 ```json
 {
   "transport": "sse",
