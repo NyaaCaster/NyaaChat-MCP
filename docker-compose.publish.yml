@@ -1,0 +1,14 @@
+services:
+  app:
+    image: ${PRIVATE_DOCKER_REGISTRY_HOST:?err}/nyaachat-mcp:latest
+    container_name: nyaachat-mcp
+    pull_policy: always
+    environment:
+      - TZ=Asia/Shanghai
+      - MCP_PORT=3094
+      - MCP_HOST=0.0.0.0
+    env_file:
+      - .env
+    ports:
+      - "3094:3094"
+    restart: unless-stopped

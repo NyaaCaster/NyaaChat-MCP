@@ -1,7 +1,9 @@
 #!/bin/bash
+# ⚠ DEPRECATED — use `python rebuild.py` instead (push to private registry + build).
 set -e
 COMPOSE_FILE="docker-compose.yml"
 
+echo "⚠ DEPRECATED — use python rebuild.py"
 echo "Stopping containers..."
 docker compose -f $COMPOSE_FILE down
 

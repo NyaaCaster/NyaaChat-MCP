@@ -1,6 +1,11 @@
+# ⚠ DEPRECATED — use `python rebuild.py` instead.
+# This script only does local build + up -d.
+# rebuild.py additionally pushes to private registry (NyaaDockerHUB) for macmini deployment.
+
 $ErrorActionPreference = "Stop"
 $COMPOSE_FILE = "docker-compose.yml"
 
+Write-Host "DEPRECATED — use python rebuild.py" -ForegroundColor Yellow
 Write-Host "Stopping containers..." -ForegroundColor Cyan
 docker compose -f $COMPOSE_FILE down
 
