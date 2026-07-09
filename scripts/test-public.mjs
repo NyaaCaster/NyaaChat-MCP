@@ -3,7 +3,11 @@
 // 用法：MCP_API_KEY=xxx node scripts/test-public.mjs
 // 注意：MCP_API_KEY 不要写入文件，命令行临时传入。
 
-const URL = process.env.MCP_URL || 'http://h.nyaa.host:3094/mcp';
+const URL = process.env.MCP_URL;
+if (!URL) {
+  console.error('需要设置 MCP_URL 环境变量');
+  process.exit(1);
+}
 const KEY = process.env.MCP_API_KEY;
 if (!KEY) {
   console.error('需要设置 MCP_API_KEY 环境变量');
