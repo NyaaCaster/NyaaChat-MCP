@@ -774,7 +774,7 @@ src/
     └── regions.ts        # 统一 resolveRegionAlias（country ?? province）
 Dockerfile
 docker-compose.yml
-rebuild.ps1 / rebuild.sh
+rebuild.py / restart.py
 .env.example
 ```
 
@@ -801,17 +801,14 @@ curl -X POST http://127.0.0.1:3094/mcp \
 
 ## 3.5 Docker 部署
 
-```powershell
-# Windows（必须带 -ExecutionPolicy Bypass）
-powershell -ExecutionPolicy Bypass -File .\rebuild.ps1
-```
-
 ```bash
-# Linux / macOS
-bash ./rebuild.sh
+# 所有平台统一使用 Python 脚本
+python rebuild.py          # 构建 + 推送私有仓库 + 重启
+python rebuild.py --no-cache  # 强制无缓存重建
+python rebuild.py --skip-push  # 仅本地构建 + 重启（调试用）
 ```
 
-`rebuild` 脚本会：停容器 → 无缓存重建 → 清 dangling 镜像 → 启动 → 列出运行状态。
+`rebuild.py` 流程：构建镜像（tag = git short SHA + latest）→ 推送到 NyaaDockerHUB → 仓库端清理旧 tag → `docker compose up -d` 重启 → 本地清理。
 
 容器内：
 - 时区固定 `Asia/Shanghai`（由 `tzdata` + `/etc/localtime` 设置）
