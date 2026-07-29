@@ -86,9 +86,15 @@ EOF
 
 - 默认目标：`origin master`（仓库唯一活跃分支）。
 - 推送前**必须**与用户二次确认，特别是包含：构建配置、Dockerfile、`docker-compose.yml`、依赖锁文件、大量删除的提交。
-- 标准命令：`git push origin master`。
-- **Windows / Session 0 已知坑**：若 `git push` 报 `could not read Username` / `wincredman` / `A specified logon session does not exist`，是 Claude Code 跑在 Session 0、DPAPI/Git Credential Manager 取不到凭据所致——不要在 `credsStore` / git config 上纠缠。直接用 `windows-user-session-runner` skill 把 `git push origin master` 包进 `schtasks /it`（用户交互会话 Session 1）执行。
+- 标准命令：`git -c http.extraHeader="Authorization: Bearer $GITHUB_PAT" push origin master`。
 - 推送完成后跑一次 `git status` 验证本地与远端一致。
+
+## GitHub 鉴权（MUST）
+
+所有 `git push` / `gh` 操作必须通过 `$GITHUB_PAT` 鉴权。
+`$GITHUB_PAT` 由 `H:\GitHub\.claude\settings.json` 的 `env` 段注入，无需手动设置。
+
+禁止裸 `git push`（会走 DPAPI/Credential Manager → Session 0 报错）。
 
 ## 绝不提交（pre-check 清单）
 
@@ -121,8 +127,8 @@ EOF
 本项目当前是单分支直推流；如用户要求改用 PR 流程：
 
 1. 新建特性分支：`git checkout -b feat/<short-name>`
-2. 提交、推送：`git push -u origin feat/<short-name>`
-3. 用 `gh pr create` 创建 PR，标题用 Conventional Commits 风格，body 使用 HEREDOC。
+2. 提交、推送：`git -c http.extraHeader="Authorization: Bearer $GITHUB_PAT" push -u origin feat/<short-name>`
+3. 用 `GH_TOKEN=$GITHUB_PAT gh pr create` 创建 PR，标题用 Conventional Commits 风格，body 使用 HEREDOC。
 4. PR body 不附加 "🤖 Generated with Claude Code" 之类的水印——与仓库无水印的提交风格一致。
 
 ## 给用户的最终汇报
